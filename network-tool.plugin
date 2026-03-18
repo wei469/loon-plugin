@@ -1,0 +1,10 @@
+#!name=网络工具（自用）
+#!desc=纯净度 + 链路分析
+#!author=你自己
+#!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png
+
+[Script]
+
+generic script-path=https://你的GitHub地址/ip_quality.js, timeout=10, tag=IP纯净度, img-url=leaf
+
+generic script-path=https://你的GitHub地址/link_info.js, timeout=10, tag=链路分析, img-url=network
