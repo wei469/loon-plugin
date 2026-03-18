@@ -5,6 +5,6 @@
 
 [Script]
 
-generic script-path=https://https://raw.githubusercontent.com/wei469/loon-plugin/refs/heads/main/ip_quality.js/ip_quality.js, timeout=10, tag=IP纯净度, img-url=leaf
+generic script-path=https://raw.githubusercontent.com/wei469/loon-plugin/main/ip_quality.js, timeout=10, tag=IP纯净度, img-url=leaf
 
-generic script-path=https://https://raw.githubusercontent.com/wei469/loon-plugin/refs/heads/main/link_info.js/link_info.js, timeout=10, tag=链路分析, img-url=network
+generic script-path=https://raw.githubusercontent.com/wei469/loon-plugin/main/link_info.js, timeout=10, tag=链路分析, img-url=network
