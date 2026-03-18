@@ -1,79 +1,102 @@
-function flag(code) {
-  return code
-    ? String.fromCodePoint(
-        ...code.toUpperCase().split("").map(c => 127397 + c.charCodeAt())
-      )
-    : "";
-}
+/*
+ *
+ *
+*
+*
+*/
+const titleText = "ip纯净度";
+const url = "https://my.123169.xyz/v1/info";
 
-function color(score) {
-  if (score <= 30) return "green";
-  if (score <= 60) return "orange";
-  return "red";
-}
-
-function level(score) {
-  if (score <= 30) return "纯净";
-  if (score <= 60) return "一般";
-  return "风险";
-}
-
-async function req(url, node) {
-  return new Promise(resolve => {
-    $httpClient.get({ url, node }, (e, r, d) => {
-      try { resolve(JSON.parse(d)); } catch { resolve(null); }
+async function request(method, params) {
+  return new Promise((resolve) => {
+    const httpMethod = $httpClient[method.toLowerCase()];
+    httpMethod(params, (error, response, data) => {
+      resolve({ error, response, data });
     });
   });
 }
 
-(async () => {
-  const node = $environment.params?.node;
+function getFlagEmoji(code) {
+  if (!code) return "🌍";
+  const c = String(code).toUpperCase();
+  if (c === "TW") return `<img src="https://he2o.vercel.app/Resource/Icon/Emoji.png" style="width:1.3em;height:1.3em;">`;
+  if (c.length !== 2) return "";
+  return String.fromCodePoint(...c.split("").map(ch => 127397 + ch.charCodeAt(0))) + " ";
+}
 
-  // IPPure
-  let data = await req("https://my.ippure.com/v1/info", node);
+function getScoreLevel(score) {
+  if (score === "N/A" || score === null || score === undefined) return { text: "暂无风险(仅供参考)", color: "#000" };
+  const s = Number(score);
+  if (s >= 0 && s <= 15) return { text: "极度纯净 🟢", color: "#12512a" };
+  if (s >= 16 && s <= 25) return { text: "纯净 ✅", color: "#1b9e4b" };
+  if (s >= 26 && s <= 40) return { text: "中性 🟩", color: "#6aa312" };
+  if (s >= 41 && s <= 50) return { text: "轻度风险 🟡", color: "#bb8f06" };
+  if (s >= 51 && s <= 70) return { text: "中度风险 🟠", color: "#be5105" };
+  if (s >= 71 && s <= 100) return { text: "极度风险 🔴", color: "#ae1c1c" };
+  return { text: "暂无风险(仅供参考)", color: "#000" };
+}
 
-  // fallback
-  if (!data) {
-    data = await req("http://ip-api.com/json/?lang=zh-CN", node);
+async function main() {
+  const nodeName = $environment.params?.node;
+  const { error, response, data } = await request("GET", { url, node: nodeName });
+
+  if (error || !data) {
+    return $done({ title: titleText, htmlMessage: "<b>网络错误</b>" });
   }
 
-  const ip = data?.ipAddress || data?.query || "未知";
-  const country = data?.country || "未知";
-  const code = data?.countryCode || "";
-  const city = data?.city || "";
-  const isp = data?.asOrganization || data?.isp || "未知";
+  let json;
+  try {
+    json = JSON.parse(data);
+  } catch {
+    return $done({ title: titleText, htmlMessage: "<b>JSON 数据无效</b>" });
+  }
 
-  const score = data?.fraudScore ?? 50;
+  const ip = json.ipAddress || json.query || json.ip || "未知";
+  const isp = json.asOrganization || "未知";
+  const asn = json.asNumber || json.asn || (json.as && json.as.replace(/[^0-9]/g, "")) || "未知";
+  const flag = getFlagEmoji(json.countryCode);
+  const loc = (flag ? flag : "") + [...new Set([json.country, json.region, json.city].filter(Boolean))].join(", ") || "未知";
 
-  // 类型判断
-  const type = data?.ipType === "residential" ? "🏠 住宅IP" : "🏢 机房IP";
-  const native = data?.isNative ? "🟢 原生IP" : "🟡 广播IP";
+  const score = json.fraudScore;
+  const level = getScoreLevel(score);
+  const scoreHtml = (score === null || score === undefined || score === "N/A")
+    ? `<span style="color:#000;">暂无风险(仅供参考)</span>`
+    : score > 0
+      ? `<span style="color:${level.color};">${score}% ${level.text}</span>`
+      : `<span style="color:${level.color};">${level.text}</span>`;
+
+  const isRes = Boolean(json.isResidential);
+  const isBrd = Boolean(json.isBroadcast);
+  const typeText = isRes ? "🏠 住宅网络" : "🏢 数据中心";
+  const brdText = isBrd ? "📡 广播" : "🌐 原生";
+  const typeColor = isRes ? "#12512a" : "#6aa312";
+  const brdColor = isBrd ? "#bb8f06" : "#12512a";
+  const htmlType = `<span style="color:${typeColor};">${typeText}</span> • <span style="color:${brdColor};">${brdText}</span>`;
 
   const html = `
-<p style="text-align:center">
+<div style="margin:0;padding:0;font-family:-apple-system;font-size:large;">
 
-<b>🌍 位置</b><br>
-${flag(code)} ${country} ${city}<br><br>
+<b>IP:</b> ${ip}<br><br>
+<b>位置:</b> ${loc}<br><br>
+<b>ISP:</b> ${isp}<br><br>
+<b>ASN:</b> ${asn}<br><br>
+<b>属性:</b> ${htmlType}<br><br>
+<b>系数:</b> ${scoreHtml}<br><br>
 
-<b>🌐 ISP</b><br>
-${isp}<br><br>
+<div>
+<b>节点</b> ➟ <span style="color:${level.color};">${nodeName ?? "未知节点"}</span>
+</div>
 
-<b>📡 IP地址</b><br>
-${ip}<br><br>
+</div>
+`.trim();
 
-<b>📊 IP类型</b><br>
-${type} ｜ ${native}<br><br>
+  return $done({ title: titleText, htmlMessage: html });
+}
 
-<b>🛡 纯净度</b><br>
-<font color="${color(score)}">${100 - score}%（${level(score)}）</font><br><br>
-
-——————————————<br>
-节点：${node}
-</p>
-`;
-
-  $done({
-    title: "IP纯净度检测",
-    htmlMessage: html
-  });
+(async () => {
+  try {
+    await main();
+  } catch (e) {
+    $done({ title: titleText, htmlMessage: "<b>脚本错误：</b>" + e.message });
+  }
 })();
