@@ -1,59 +1,79 @@
-async function request(method, params) {
-  return new Promise((resolve) => {
-    const fn = $httpClient[method.toLowerCase()];
-    fn(params, (err, resp, data) => {
-      resolve({ err, resp, data });
+function flag(code) {
+  return code
+    ? String.fromCodePoint(
+        ...code.toUpperCase().split("").map(c => 127397 + c.charCodeAt())
+      )
+    : "";
+}
+
+function color(score) {
+  if (score <= 30) return "green";
+  if (score <= 60) return "orange";
+  return "red";
+}
+
+function level(score) {
+  if (score <= 30) return "纯净";
+  if (score <= 60) return "一般";
+  return "风险";
+}
+
+async function req(url, node) {
+  return new Promise(resolve => {
+    $httpClient.get({ url, node }, (e, r, d) => {
+      try { resolve(JSON.parse(d)); } catch { resolve(null); }
     });
   });
 }
 
-async function main() {
+(async () => {
   const node = $environment.params?.node;
 
-  // 优先 IPPure
-  let { data } = await request("GET", {
-    url: "https://my.ippure.com/v1/info",
-    node
-  });
+  // IPPure
+  let data = await req("https://my.ippure.com/v1/info", node);
 
-  let json;
-
-  try {
-    json = JSON.parse(data);
-  } catch {
-    // fallback ip-api
-    let fallback = await request("GET", {
-      url: "http://ip-api.com/json/?lang=zh-CN",
-      node
-    });
-    json = JSON.parse(fallback.data);
+  // fallback
+  if (!data) {
+    data = await req("http://ip-api.com/json/?lang=zh-CN", node);
   }
 
-  const ip = json.ipAddress || json.query || "未知";
-  const isp = json.asOrganization || json.isp || "未知";
-  const loc = [json.city, json.region, json.country].filter(Boolean).join(" ");
+  const ip = data?.ipAddress || data?.query || "未知";
+  const country = data?.country || "未知";
+  const code = data?.countryCode || "";
+  const city = data?.city || "";
+  const isp = data?.asOrganization || data?.isp || "未知";
 
-  const score = json.fraudScore ?? "N/A";
+  const score = data?.fraudScore ?? 50;
 
-  function level(score) {
-    if (score === "N/A") return "未知";
-    if (score <= 25) return "纯净";
-    if (score <= 50) return "中等";
-    return "高风险";
-  }
+  // 类型判断
+  const type = data?.ipType === "residential" ? "🏠 住宅IP" : "🏢 机房IP";
+  const native = data?.isNative ? "🟢 原生IP" : "🟡 广播IP";
 
   const html = `
-<b>IP:</b> ${ip}<br><br>
-<b>位置:</b> ${loc}<br><br>
-<b>ISP:</b> ${isp}<br><br>
-<b>风险评分:</b> ${score}<br><br>
-<b>评级:</b> ${level(score)}
+<p style="text-align:center">
+
+<b>🌍 位置</b><br>
+${flag(code)} ${country} ${city}<br><br>
+
+<b>🌐 ISP</b><br>
+${isp}<br><br>
+
+<b>📡 IP地址</b><br>
+${ip}<br><br>
+
+<b>📊 IP类型</b><br>
+${type} ｜ ${native}<br><br>
+
+<b>🛡 纯净度</b><br>
+<font color="${color(score)}">${100 - score}%（${level(score)}）</font><br><br>
+
+——————————————<br>
+节点：${node}
+</p>
 `;
 
   $done({
-    title: "IP纯净度",
+    title: "IP纯净度检测",
     htmlMessage: html
   });
-}
-
-main();
+})();
