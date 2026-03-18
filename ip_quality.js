@@ -1,10 +1,11 @@
 /*
  *
  *
+by https://raw.githubusercontent.com/sooyaaabo/Loon/main/Script/IPPure/IPPure.js
 *
 *
 */
-const titleText = "ip纯净度";
+const titleText = "网络质量 𝕏";
 const url = "https://my.123169.xyz/v1/info";
 
 async function request(method, params) {
