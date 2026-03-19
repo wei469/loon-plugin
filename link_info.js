@@ -1,6 +1,7 @@
 /**
- * 节点入口落地查询 - 五维漏斗智能研判版 (引入 204 极速物理探针)
- * 采用 物理断联拦截 -> 直连/血统鉴定 -> CDN剥离 -> 物理延迟测谎 -> 专线标签加冕 的五维混合计算引擎
+ * 节点入口落地查询 - 大一统积分风控版 (终极形态)
+ * 架构：前置拓扑漏斗 (分流直连/中转) + 后置四维积分引擎 (精准评级)
+ * 探针：引入 HTTP 204 极速探针，结合广东出海物理红线
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
 
@@ -8,7 +9,7 @@ const scriptName = "入口落地智能分析";
 
 // ================== 核心配置与四大字典 ==================
 
-// 1. 👑 贵族 ASN 字典 (直连血统鉴定)
+// 1. 👑 贵族 ASN 字典 (定级：+3分)
 const ASNDict = {
     "AS4809": "电信 CN2 GIA",
     "AS9929": "联通 CU VIP",
@@ -16,26 +17,30 @@ const ASNDict = {
     "AS58453": "移动 CMIN2",
     "AS35993": "中华电信 Hinet",
     "AS4637": "Telstra 优化",
-    "AS9299": "PCCW Global",
-    "AS4134": "电信 163",
-    "AS4837": "联通 169",
-    "AS9808": "移动 CMNET"
+    "AS9299": "PCCW Global"
 };
 
-// 2. ☁️ CDN 与伪装特征字典 (剥离 CDN)
+// 2. ☁️ CDN 与伪装特征字典 (定级：-2分)
 const CDN_ASN = ["AS13335", "AS20940", "AS16625", "AS54113", "AS16509", "AS396982", "AS31898", "AS133199"];
 const CDN_Keywords = ["cloudflare", "akamai", "fastly", "amazon", "cloudfront", "cdn77", "imperva", "sucuri"];
 const Blocked_IPs = ["127.0.0.1", "0.0.0.0", "::1"];
 
-// 3. 🏷️ 商家命名特征正则 (专线白名单)
+// 3. 🏷️ 商家命名特征正则 (定级：+1分)
 const regex_Premium = /(IPLC|IEPL|专线|唯云|AIA|游戏)/i;
 const regex_Endpoints = /(深港|广港|莞港|沪日|沪韩|京德|京俄|广新|苏日)/i;
 
-// 4. ⏱️ 物理延迟红线阈值 (使用极速 204 探针测出的真实延迟)
+// 4. ⏱️ 物理延迟红线阈值 (以中国广东为起点的探针红线，包含握手税)
 const Latency_Limits = {
-    Zone_1: { keywords: /(港|HK|Hong Kong|澳|Macau|台|TW|Taiwan)/i, max_ms: 60 },
-    Zone_2: { keywords: /(日|JP|Japan|韩|KR|Korea|新|SG|Singapore)/i, max_ms: 95 },
-    Zone_3: { keywords: /(美|US|America|德|DE|英|UK|法|FR|欧|EU)/i, max_ms: 210 }
+    // 港/澳
+    Zone_1: { keywords: /(港|HK|Hong Kong|澳|Macau)/i, fast: 60, normal: 120 },
+    // 台/新/马/菲
+    Zone_2: { keywords: /(台|TW|Taiwan|新|SG|Singapore|马|MY|Malaysia|菲|PH)/i, fast: 150, normal: 250 },
+    // 日/韩
+    Zone_3: { keywords: /(日|JP|Japan|韩|KR|Korea)/i, fast: 180, normal: 300 },
+    // 美西/澳洲
+    Zone_4: { keywords: /(美|US|America|澳|AU|Australia)/i, fast: 420, normal: 600 },
+    // 欧/美东及其他
+    Zone_5: { keywords: /(德|DE|英|UK|法|FR|欧|EU|俄|RU)/i, fast: 650, normal: 850 }
 };
 
 // ================== 主程序执行入口 ==================
@@ -49,13 +54,13 @@ const Latency_Limits = {
         
         const hideIP = $persistentStore.read("是否隐藏真实IP") === "隐藏";
 
-        // 严格顺序 1：获取落地信息 & 真实物理延迟 (并发执行，不影响安全路由)
+        // 严格顺序 1：获取落地信息 & 真实物理延迟
         let landingInfo = {};
         let realPing = 9999; 
         try {
             const [ldRes, pingRes] = await Promise.all([
                 getIPInfo("", nodeName),
-                getRealPing(nodeName) // 🚀 触发 204 极速探针
+                getRealPing(nodeName) // 触发 204 极速探针
             ]);
             landingInfo = ldRes;
             realPing = pingRes;
@@ -73,7 +78,7 @@ const Latency_Limits = {
             entranceInfo = { error: "INFailed 入口查询失败" };
         }
 
-        // 🧠 核心大脑：调用五维漏斗研判引擎 (传入极速真实 Ping 值)
+        // 🧠 核心大脑：调用拓扑漏斗 + 四维积分引擎
         let cfw = evaluateNode(entranceInfo, landingInfo, nodeName, realPing);
 
         // UI 渲染：组装入口文本
@@ -91,7 +96,7 @@ const Latency_Limits = {
         <font>${translateISP(entranceInfo.isp)}</font><br><br>`;
         }
 
-        // UI 渲染：组装落地文本 (展示极速 Ping)
+        // UI 渲染：组装落地文本
         let outs = "";
         if (landingInfo.error) {
             outs = `<br>${landingInfo.error}<br><br>`;
@@ -130,76 +135,94 @@ const Latency_Limits = {
     }
 })();
 
-// ================== 五维漏斗智能研判引擎 (The Brain) ==================
+// ================== 核心：拓扑漏斗 + 四维积分引擎 ==================
 
 function evaluateNode(ent, lnd, nodeName, realPing) {
-    // 🔴 第一维：致命拦截 (防断联与超时)
+    // 🔴 致命拦截：完全不通
     if (lnd.error) return "⟦ ⚠️ 节点未通 / 代理失效 ⟧";
 
     let entASN = extractASN(ent.asn);
     let lndASN = extractASN(lnd.asn);
-    let prefix = "";
-
-    // 🔵 第二维：真理鉴定 (物理直连判定)
+    
+    // ----------------- 模块一：定性 (拓扑漏斗) -----------------
     let isDirect = false;
     if (!ent.error && ent.ip) {
-        if (ent.ip === lnd.ip) isDirect = true; 
-        if (entASN && lndASN && entASN === lndASN) isDirect = true; 
+        if (ent.ip === lnd.ip) isDirect = true; // IP完全一致
+        if (entASN && lndASN && entASN === lndASN) isDirect = true; // 同机房同ASN
     }
 
-    if (isDirect) {
-        if (ASNDict[lndASN]) return `⟦ 🚄 优化直连 | ${ASNDict[lndASN]} ⟧`;
-        return "⟦ 🚙 常规直连网络 ⟧";
+    // ----------------- 模块二：定量 (四维积分算分) -----------------
+    let score = 0;
+    let prefix = "";
+
+    // 维度 1: 👑 贵族 ASN (+3分)
+    if (ASNDict[lndASN]) {
+        score += 3;
     }
 
-    // 🟡 第三维：迷雾剥离 (CDN / 盲测推断)
+    // 维度 2: ☁️ CDN 伪装剥离 (-2分)
     if (ent.error || Blocked_IPs.includes(ent.ip)) {
-        prefix = "❓盲测 | ";
+        prefix = "❓盲测 | "; // 查不到入口，不加不扣，打上盲测标签
     } else {
         const isCDN_ISP = CDN_Keywords.some(k => (ent.isp || "").toLowerCase().includes(k));
         if (CDN_ASN.includes(entASN) || isCDN_ISP) {
-            prefix = "☁️CDN接入 | ";
+            score -= 2;
+            prefix = "☁️CDN减速 | ";
         }
     }
 
-    // 🟢 第四维：物理测谎仪兜底 (使用极速真实 Ping)
-    let max_ms = 300; 
-    let zone = "未知区域";
-    const lndStr = `${lnd.country} ${lnd.region} ${lnd.city}`;
-
-    if (Latency_Limits.Zone_1.keywords.test(lndStr)) { max_ms = Latency_Limits.Zone_1.max_ms; zone = "极速圈"; }
-    else if (Latency_Limits.Zone_2.keywords.test(lndStr)) { max_ms = Latency_Limits.Zone_2.max_ms; zone = "近邻圈"; }
-    else if (Latency_Limits.Zone_3.keywords.test(lndStr)) { max_ms = Latency_Limits.Zone_3.max_ms; zone = "跨海圈"; }
-
-    // 🔮 异常兜底：BGP 漂移悖论拦截
-    if (zone === "跨海圈" && realPing < 60) {
-        return prefix + "⟦ 🔮 伪装归属地 / BGP广播 ⟧";
-    }
-
-    // 测谎判定：真实延迟依然超标，扒去专线外衣
-    if (realPing > max_ms) {
-        return prefix + "⟦ ✈️ 常规公网中转 ⟧";
-    }
-
-    // 🟣 第五维：标签背书 (扛过测谎仪，用名字加冕)
+    // 维度 3: 🏷️ 商家命名背书 (+1分)
     if (regex_Premium.test(nodeName) || regex_Endpoints.test(nodeName)) {
-        return prefix + "⟦ 🚀 顶级物理专线 ⟧";
+        score += 1;
     }
+
+    // 维度 4: ⏱️ 物理延迟红线 (+3分 / +1分 / -1分)
+    const lndStr = `${lnd.country} ${lnd.region} ${lnd.city}`;
+    let fast_limit = 300; 
+    let normal_limit = 500; 
     
-    // 延迟达标但没写专线
-    return prefix + "⟦ ⚡ 优质低延迟中转 ⟧";
+    // 匹配广东专属红线
+    if (Latency_Limits.Zone_1.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_1.fast; normal_limit = Latency_Limits.Zone_1.normal; }
+    else if (Latency_Limits.Zone_2.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_2.fast; normal_limit = Latency_Limits.Zone_2.normal; }
+    else if (Latency_Limits.Zone_3.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_3.fast; normal_limit = Latency_Limits.Zone_3.normal; }
+    else if (Latency_Limits.Zone_4.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_4.fast; normal_limit = Latency_Limits.Zone_4.normal; }
+    else if (Latency_Limits.Zone_5.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_5.fast; normal_limit = Latency_Limits.Zone_5.normal; }
+
+    // 计算延迟得分
+    if (realPing <= fast_limit) {
+        score += 3;
+    } else if (realPing <= normal_limit) {
+        score += 1;
+    } else {
+        score -= 1;
+    }
+
+    // ----------------- 最终判决书输出 -----------------
+    
+    if (isDirect) {
+        // 🟢 直连系判决
+        if (score >= 4) return prefix + "⟦ 🚄 极品优化直连 ⟧";
+        if (score >= 2) return prefix + "⟦ 🚙 优质常规直连 ⟧";
+        if (score >= 0) return prefix + "⟦ 🐌 拥堵/平庸直连 ⟧";
+        return prefix + "⟦ ⚠️ 劣质直连 / 减速云 ⟧";
+    } else {
+        // 🔵 中转/专线系判决
+        if (score >= 4) return prefix + "⟦ 🚀 顶级物理专线 ⟧";
+        if (score >= 2) return prefix + "⟦ ⚡ 优质高能中转 ⟧";
+        if (score >= 0) return prefix + "⟦ ✈️ 常规公网中转 ⟧";
+        return prefix + "⟦ ⚠️ 劣质/减速节点 ⟧";
+    }
 }
 
 // ================== 工具函数 ==================
 
-// 🚀 极速 204 物理延迟探针
+// 极速 204 物理延迟探针
 async function getRealPing(node) {
     return new Promise((resolve) => {
         let start = Date.now();
-        // 访问 Cloudflare 的极速空网页，只测传输延迟
         $httpClient.get({ url: "http://cp.cloudflare.com/generate_204", node: node, timeout: 3000 }, (err, resp) => {
             if (err || !resp || (resp.status !== 200 && resp.status !== 204)) {
-                resolve(9999); // 探测失败返回极高延迟
+                resolve(9999); 
             } else {
                 resolve(Date.now() - start);
             }
@@ -225,7 +248,6 @@ function translateISP(isp) {
     return isp; 
 }
 
-// 核心网络请求封装 (兼容了 204 状态码)
 function httpGet(opts) {
     return new Promise((resolve, reject) => {
         $httpClient.get(opts, (err, resp, data) => {
