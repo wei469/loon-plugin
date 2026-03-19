@@ -1,5 +1,5 @@
 /**
- * 节点入口落地查询 - 终极融合优化版 (带运营商中文翻译)
+ * 节点入口落地查询 - 终极融合优化版
  * 结合了稳定的查询引擎与优美的UI界面，支持 直连/中转/专线 智能判断
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
@@ -142,12 +142,13 @@ async function getIPInfo(ip, node = null) {
         try {
             let start = Date.now();
             let opts = { url: api.url, timeout: 4000 };
-            if (node) opts.node = node; 
+            if (node) opts.node = node; // 如果传入了节点，则强制走代理节点
 
             let res = await httpGet(opts);
             let info = api.parser(res);
             info.time = Date.now() - start;
             
+            // 简单清洗数据，防止出现 undefined
             for(let key in info) { if(!info[key]) info[key] = "-"; }
             return info;
         } catch (e) {
@@ -156,20 +157,6 @@ async function getIPInfo(ip, node = null) {
         }
     }
     throw new Error("所有IP查询接口均超时或受限");
-}
-
-// 运营商中文翻译机
-function translateISP(isp) {
-    if (!isp) return "-";
-    let upperISP = isp.toUpperCase();
-    if (upperISP.includes("CHINANET") || upperISP.includes("TELECOM")) return "中国电信";
-    if (upperISP.includes("UNICOM")) return "中国联通";
-    if (upperISP.includes("MOBILE")) return "中国移动";
-    if (upperISP.includes("TENCENT")) return "腾讯云";
-    if (upperISP.includes("ALIBABA") || upperISP.includes("ALIPAY")) return "阿里云";
-    if (upperISP.includes("HUAWEI")) return "华为云";
-    if (upperISP.includes("BROADCASTING")) return "中国广电";
-    return isp; // 如果没有匹配到，就保留原样
 }
 
 // 解析 ip-api 数据格式
@@ -182,7 +169,7 @@ function parseIpApi(data) {
         countryCode: json.countryCode,
         region: json.regionName,
         city: json.city,
-        isp: translateISP(json.isp || json.org), // 这里加了翻译
+        isp: json.isp || json.org,
         asn: json.as
     };
 }
@@ -196,14 +183,14 @@ function parseIpSb(data) {
         countryCode: json.country_code,
         region: json.region,
         city: json.city,
-        isp: translateISP(json.isp || json.organization), // 这里加了翻译
+        isp: json.isp || json.organization,
         asn: json.asn ? `AS${json.asn}` : ''
     };
 }
 
-// 域名解析
+// 域名解析 (如果节点地址是域名，需先解析出入口IP)
 async function resolveDomain(domain) {
-    if (/^[0-9.]+$/.test(domain) || /:/.test(domain)) return domain; 
+    if (/^[0-9.]+$/.test(domain) || /:/.test(domain)) return domain; // 如果已经是 IP 则直接返回
     try {
         let res = await httpGet({ url: `https://223.5.5.5/resolve?name=${domain}&type=A&short=1`, timeout: 3000 });
         let ips = JSON.parse(res);
