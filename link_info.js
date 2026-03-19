@@ -1,6 +1,6 @@
 /**
- * 节点入口落地查询 - 大一统积分风控版 (终极白盒诊断版)
- * 架构：前置拓扑漏斗 + 后置四维积分引擎 + 动态带分标签 + 海量汉化词库
+ * 节点入口落地查询 - 大一统积分风控版 (终极视觉优化版)
+ * 架构：前置拓扑漏斗 + 后置四维积分引擎 + 极简纯文本诊断标签 + 海量汉化词库
  * 探针：引入 HTTP 204 极速探针，结合广东出海 +5% 宽容度物理红线
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
@@ -78,7 +78,7 @@ const Latency_Limits = {
             entranceInfo = { error: "INFailed 入口查询失败" };
         }
 
-        // 🧠 核心大脑：调用拓扑漏斗 + 四维积分引擎 + 动态白盒标签
+        // 🧠 核心大脑：调用拓扑漏斗 + 四维积分引擎 + 极简诊断标签
         let cfw = evaluateNode(entranceInfo, landingInfo, nodeName, realPing);
 
         // UI 渲染：组装入口文本
@@ -135,7 +135,7 @@ const Latency_Limits = {
     }
 })();
 
-// ================== 核心：拓扑漏斗 + 四维积分引擎 + 白盒诊断 ==================
+// ================== 核心：拓扑漏斗 + 四维积分引擎 + 极简诊断 ==================
 
 function evaluateNode(ent, lnd, nodeName, realPing) {
     // 🔴 致命拦截：完全不通
@@ -151,32 +151,32 @@ function evaluateNode(ent, lnd, nodeName, realPing) {
         if (entASN && lndASN && entASN === lndASN) isDirect = true; 
     }
 
-    // ----------------- 模块二：定量 (四维积分与波动标签收集) -----------------
+    // ----------------- 模块二：定量 (四维积分与极简标签收集) -----------------
     let score = 0;
-    let activeTags = []; // 只要产生分数波动，就扔进这个动态标签池，0分自动忽略
+    let activeTags = []; // 只要产生分数波动，就扔进这个标签池，剥离了数字干扰
 
     // 维度 1: 👑 贵族 ASN (+3分)
     if (ASNDict[lndASN]) {
         score += 3;
-        activeTags.push("+3 贵族专网");
+        activeTags.push("贵族专网");
     }
 
     // 维度 2: ☁️ CDN 伪装剥离 (-1分)
     if (ent.error || Blocked_IPs.includes(ent.ip)) {
         score -= 1;
-        activeTags.push("-1 入口盲测");
+        activeTags.push("入口盲测");
     } else {
         const isCDN_ISP = CDN_Keywords.some(k => (ent.isp || "").toLowerCase().includes(k));
         if (CDN_ASN.includes(entASN) || isCDN_ISP) {
             score -= 1;
-            activeTags.push("-1 CDN减速壳");
+            activeTags.push("CDN减速壳");
         }
     }
 
     // 维度 3: 🏷️ 商家命名背书 (+1分)
     if (regex_Premium.test(nodeName) || regex_Endpoints.test(nodeName)) {
         score += 1;
-        activeTags.push("+1 专线背书");
+        activeTags.push("专线背书");
     }
 
     // 维度 4: ⏱️ 物理延迟红线 (+3分 / +1分 / -1分)
@@ -192,17 +192,17 @@ function evaluateNode(ent, lnd, nodeName, realPing) {
 
     if (realPing <= fast_limit) {
         score += 3;
-        activeTags.push("+3 极速响应");
+        activeTags.push("极速响应");
     } else if (realPing <= normal_limit) {
         score += 1;
-        activeTags.push("+1 延迟达标"); 
+        activeTags.push("延迟达标"); 
     } else {
         score -= 1;
-        activeTags.push("-1 拥堵/绕路");
+        activeTags.push("拥堵/绕路");
     }
 
     // ----------------- 标签组装 -----------------
-    // 把波动产生的所有标签拼接，没有波动的0分维度天然被过滤
+    // 把波动产生的所有纯文字标签拼接，没有波动的0分维度天然被过滤
     let tagsStr = activeTags.length > 0 ? " ｜ " + activeTags.join(" · ") : "";
 
     // ----------------- 最终判决书输出 -----------------
@@ -281,7 +281,7 @@ function translateISP(isp) {
     if (lowerISP.includes("ovh")) return "OVH";
     if (lowerISP.includes("equinix")) return "Equinix";
 
-    return isp; // 未匹配到则原样输出
+    return isp; 
 }
 
 function httpGet(opts) {
