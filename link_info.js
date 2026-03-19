@@ -1,5 +1,5 @@
 /**
- * 节点入口落地查询 - 终极融合优化版 (提速+防崩版)
+ * 节点入口落地查询 - 终极融合优化版 (精准防错+入口汉化版)
  * 结合了稳定的查询引擎与优美的UI界面，支持 直连/中转/专线 智能判断
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
@@ -9,39 +9,30 @@ const scriptName = "入口落地查询";
 (async () => {
     try {
         const loonInfo = typeof $loon !== "undefined" ? $loon.split(" ") : ["Loon", "Unknown", ""];
-        const inputParams = $environment.params || {};
-        const nodeName = inputParams.node || "未知节点";
-        const nodeInfo = inputParams.nodeInfo || {};
-        const nodeAddress = nodeInfo.address || "";
+        const inputParams = $environment.params;
+        const nodeName = inputParams.node;
+        const nodeIp = inputParams.nodeInfo.address;
         
         // 读取隐藏IP配置
         const hideIP = $persistentStore.read("是否隐藏真实IP") === "隐藏";
 
+        // 严格按照顺序查询：先获取落地信息 (通过节点请求)
         let landingInfo = {};
-        let entranceInfo = {};
+        try {
+            landingInfo = await getIPInfo("", nodeName);
+        } catch (e) {
+            landingInfo = { error: "LDFailed 落地查询超时或失败" };
+        }
 
-        // 🚀 优化点 1：使用 Promise.all 并发请求，大幅缩短查询时间
-        await Promise.all([
-            // 任务 A: 获取落地信息 (通过节点代理请求)
-            (async () => {
-                try {
-                    landingInfo = await getIPInfo("", nodeName);
-                } catch (e) {
-                    landingInfo = { error: "LDFailed 落地查询超时或失败" };
-                }
-            })(),
-            
-            // 任务 B: 获取入口信息 (解析域名后直连请求)
-            (async () => {
-                try {
-                    if (!nodeAddress) throw new Error("无节点地址");
-                    let entranceIp = await resolveDomain(nodeAddress);
-                    entranceInfo = await getIPInfo(entranceIp, null);
-                } catch (e) {
-                    entranceInfo = { error: "INFailed 入口查询超时或失败" };
-                }
-            })()
-        ]);
+        // 严格按照顺序查询：再获取入口信息 (解析域名后直连请求)
+        // 避免与落地请求并发导致 Loon 内部路由混乱，确保入口数据绝对准确
+        let entranceInfo = {};
+        try {
+            let entranceIp = await resolveDomain(nodeIp);
+            entranceInfo = await getIPInfo(entranceIp, null);
+        } catch (e) {
+            entranceInfo = { error: "INFailed 入口查询超时或失败" };
+        }
 
         // 链路类型判断逻辑
         let cfw = "⟦ 未知状态 ⟧";
@@ -49,7 +40,6 @@ const scriptName = "入口落地查询";
             if (entranceInfo.ip === landingInfo.ip) {
                 cfw = "⟦ 直连线路 ⟧";
             } else {
-                // 结合节点名称判断是否为专线
                 const nameUpper = nodeName.toUpperCase();
                 if (/(IPLC|IEPL|专线|BGP|AIA)/.test(nameUpper)) {
                     cfw = "⟦ 优质专线 ⟧";
@@ -61,7 +51,7 @@ const scriptName = "入口落地查询";
             cfw = "⟦ 网络检测失败 ⟧";
         }
 
-        // 组装入口 UI 文本
+        // 组装入口 UI 文本 (仅对入口 ISP 进行汉化映射)
         let ins = "";
         if (entranceInfo.error) {
             ins = `<br>${entranceInfo.error}<br><br>`;
@@ -76,10 +66,10 @@ const scriptName = "入口落地查询";
         <font>${HIP(entranceInfo.ip, hideIP)}</font><br><br>
         
         <b><font>入口ISP</font>:</b>
-        <font>${entranceInfo.isp}</font><br><br>`;
+        <font>${translateISP(entranceInfo.isp)}</font><br><br>`;
         }
 
-        // 组装落地 UI 文本
+        // 组装落地 UI 文本 (保持原始英文 ISP)
         let outs = "";
         if (landingInfo.error) {
             outs = `<br>${landingInfo.error}<br><br>`;
@@ -129,6 +119,19 @@ const scriptName = "入口落地查询";
 
 // ================= 工具函数 =================
 
+// ISP 汉化映射函数 (极速本地替换)
+function translateISP(isp) {
+    if (!isp) return "";
+    const lowerISP = isp.toLowerCase();
+    if (lowerISP.includes("chinanet") || lowerISP.includes("telecom")) return "中国电信";
+    if (lowerISP.includes("unicom")) return "中国联通";
+    if (lowerISP.includes("mobile")) return "中国移动";
+    if (lowerISP.includes("broadcasting") || lowerISP.includes("cbn")) return "中国广电";
+    if (lowerISP.includes("alibaba") || lowerISP.includes("alipay")) return "阿里云";
+    if (lowerISP.includes("tencent")) return "腾讯云";
+    return isp; // 如果没有匹配上，原样返回英文
+}
+
 // HTTP GET 封装
 function httpGet(opts) {
     return new Promise((resolve, reject) => {
@@ -140,7 +143,7 @@ function httpGet(opts) {
     });
 }
 
-// 核心 IP 查询逻辑
+// 核心 IP 查询逻辑 (带备用接口防超时)
 async function getIPInfo(ip, node = null) {
     const targetIp = ip ? `${ip}` : "";
     const apis = [
@@ -158,6 +161,7 @@ async function getIPInfo(ip, node = null) {
             let info = api.parser(res);
             info.time = Date.now() - start;
             
+            // 简单清洗数据，防止出现 undefined
             for(let key in info) { if(!info[key]) info[key] = "-"; }
             return info;
         } catch (e) {
@@ -168,7 +172,7 @@ async function getIPInfo(ip, node = null) {
     throw new Error("所有IP查询接口均超时或受限");
 }
 
-// 🚀 优化点 2：增加默认值和容错处理，防止接口返回不规范导致 replace 崩溃
+// 解析 ip-api 数据格式 (增加兜底防止 replace 报错)
 function parseIpApi(data) {
     let json = JSON.parse(data);
     if (json.status !== 'success') throw new Error("API返回异常");
@@ -183,6 +187,7 @@ function parseIpApi(data) {
     };
 }
 
+// 解析 ip.sb 数据格式 (增加兜底)
 function parseIpSb(data) {
     let json = JSON.parse(data);
     return {
@@ -196,9 +201,9 @@ function parseIpSb(data) {
     };
 }
 
-// 域名解析
+// 域名解析 (如果节点地址是域名，需先解析出入口IP)
 async function resolveDomain(domain) {
-    if (/^[0-9.]+$/.test(domain) || /:/.test(domain)) return domain; 
+    if (/^[0-9.]+$/.test(domain) || /:/.test(domain)) return domain; // 如果已经是 IP 则直接返回
     try {
         let res = await httpGet({ url: `https://223.5.5.5/resolve?name=${domain}&type=A&short=1`, timeout: 3000 });
         let ips = JSON.parse(res);
