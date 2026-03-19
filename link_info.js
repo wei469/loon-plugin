@@ -1,5 +1,5 @@
 /**
- * 节点入口落地查询 - 五维漏斗智能研判版 (超神版)
+ * 节点入口落地查询 - 五维漏斗智能研判版 (引入 204 极速物理探针)
  * 采用 物理断联拦截 -> 直连/血统鉴定 -> CDN剥离 -> 物理延迟测谎 -> 专线标签加冕 的五维混合计算引擎
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
@@ -31,7 +31,7 @@ const Blocked_IPs = ["127.0.0.1", "0.0.0.0", "::1"];
 const regex_Premium = /(IPLC|IEPL|专线|唯云|AIA|游戏)/i;
 const regex_Endpoints = /(深港|广港|莞港|沪日|沪韩|京德|京俄|广新|苏日)/i;
 
-// 4. ⏱️ 物理延迟红线阈值 (测谎兜底，可根据你的软路由环境微调)
+// 4. ⏱️ 物理延迟红线阈值 (使用极速 204 探针测出的真实延迟)
 const Latency_Limits = {
     Zone_1: { keywords: /(港|HK|Hong Kong|澳|Macau|台|TW|Taiwan)/i, max_ms: 60 },
     Zone_2: { keywords: /(日|JP|Japan|韩|KR|Korea|新|SG|Singapore)/i, max_ms: 95 },
@@ -49,10 +49,16 @@ const Latency_Limits = {
         
         const hideIP = $persistentStore.read("是否隐藏真实IP") === "隐藏";
 
-        // 严格顺序 1：获取落地信息 (通过节点代理请求)
+        // 严格顺序 1：获取落地信息 & 真实物理延迟 (并发执行，不影响安全路由)
         let landingInfo = {};
+        let realPing = 9999; 
         try {
-            landingInfo = await getIPInfo("", nodeName);
+            const [ldRes, pingRes] = await Promise.all([
+                getIPInfo("", nodeName),
+                getRealPing(nodeName) // 🚀 触发 204 极速探针
+            ]);
+            landingInfo = ldRes;
+            realPing = pingRes;
         } catch (e) {
             landingInfo = { error: "LDFailed 落地查询超时或节点离线" };
         }
@@ -67,8 +73,8 @@ const Latency_Limits = {
             entranceInfo = { error: "INFailed 入口查询失败" };
         }
 
-        // 🧠 核心大脑：调用五维漏斗研判引擎
-        let cfw = evaluateNode(entranceInfo, landingInfo, nodeName);
+        // 🧠 核心大脑：调用五维漏斗研判引擎 (传入极速真实 Ping 值)
+        let cfw = evaluateNode(entranceInfo, landingInfo, nodeName, realPing);
 
         // UI 渲染：组装入口文本
         let ins = "";
@@ -76,7 +82,7 @@ const Latency_Limits = {
             ins = `<br>${entranceInfo.error}<br><br>`;
         } else {
             ins = `<b><font>入口位置</font>:</b>
-        <font>${getflag(entranceInfo.countryCode)}${entranceInfo.country}&nbsp; ${entranceInfo.time}ms</font><br><br>
+        <font>${getflag(entranceInfo.countryCode)}${entranceInfo.country}</font><br><br>
         <b><font>入口地区</font>:</b>
         <font>${entranceInfo.region} ${entranceInfo.city}</font><br><br>
         <b><font>入口IP地址</font>:</b>
@@ -85,13 +91,13 @@ const Latency_Limits = {
         <font>${translateISP(entranceInfo.isp)}</font><br><br>`;
         }
 
-        // UI 渲染：组装落地文本
+        // UI 渲染：组装落地文本 (展示极速 Ping)
         let outs = "";
         if (landingInfo.error) {
             outs = `<br>${landingInfo.error}<br><br>`;
         } else {
             outs = `<b><font>落地位置</font>:</b>
-        <font>${getflag(landingInfo.countryCode)}${landingInfo.country}&nbsp; ${landingInfo.time}ms</font><br><br>
+        <font>${getflag(landingInfo.countryCode)}${landingInfo.country}&nbsp; ⚡${realPing}ms</font><br><br>
         <b><font>落地地区</font>:</b>
         <font>${landingInfo.region} ${landingInfo.city}</font><br><br>
         <b><font>落地IP地址</font>:</b>
@@ -126,7 +132,7 @@ const Latency_Limits = {
 
 // ================== 五维漏斗智能研判引擎 (The Brain) ==================
 
-function evaluateNode(ent, lnd, nodeName) {
+function evaluateNode(ent, lnd, nodeName, realPing) {
     // 🔴 第一维：致命拦截 (防断联与超时)
     if (lnd.error) return "⟦ ⚠️ 节点未通 / 代理失效 ⟧";
 
@@ -137,8 +143,8 @@ function evaluateNode(ent, lnd, nodeName) {
     // 🔵 第二维：真理鉴定 (物理直连判定)
     let isDirect = false;
     if (!ent.error && ent.ip) {
-        if (ent.ip === lnd.ip) isDirect = true; // 绝对相等
-        if (entASN && lndASN && entASN === lndASN) isDirect = true; // 同机房同ASN容差
+        if (ent.ip === lnd.ip) isDirect = true; 
+        if (entASN && lndASN && entASN === lndASN) isDirect = true; 
     }
 
     if (isDirect) {
@@ -156,8 +162,8 @@ function evaluateNode(ent, lnd, nodeName) {
         }
     }
 
-    // 🟢 第四维：物理测谎仪兜底 (延迟红线)
-    let max_ms = 300; // 默认放宽到 300ms
+    // 🟢 第四维：物理测谎仪兜底 (使用极速真实 Ping)
+    let max_ms = 300; 
     let zone = "未知区域";
     const lndStr = `${lnd.country} ${lnd.region} ${lnd.city}`;
 
@@ -165,26 +171,41 @@ function evaluateNode(ent, lnd, nodeName) {
     else if (Latency_Limits.Zone_2.keywords.test(lndStr)) { max_ms = Latency_Limits.Zone_2.max_ms; zone = "近邻圈"; }
     else if (Latency_Limits.Zone_3.keywords.test(lndStr)) { max_ms = Latency_Limits.Zone_3.max_ms; zone = "跨海圈"; }
 
-    // 🔮 异常兜底：BGP 漂移悖论拦截 (比如落地显示美国，但延迟极低)
-    if (zone === "跨海圈" && lnd.time < 60) {
+    // 🔮 异常兜底：BGP 漂移悖论拦截
+    if (zone === "跨海圈" && realPing < 60) {
         return prefix + "⟦ 🔮 伪装归属地 / BGP广播 ⟧";
     }
 
-    // 测谎判定：延迟超标，一票否决为常规中转
-    if (lnd.time > max_ms) {
+    // 测谎判定：真实延迟依然超标，扒去专线外衣
+    if (realPing > max_ms) {
         return prefix + "⟦ ✈️ 常规公网中转 ⟧";
     }
 
-    // 🟣 第五维：标签背书 (活到最后，用名字加冕)
+    // 🟣 第五维：标签背书 (扛过测谎仪，用名字加冕)
     if (regex_Premium.test(nodeName) || regex_Endpoints.test(nodeName)) {
         return prefix + "⟦ 🚀 顶级物理专线 ⟧";
     }
     
-    // 如果延迟达标但名字没写专线
+    // 延迟达标但没写专线
     return prefix + "⟦ ⚡ 优质低延迟中转 ⟧";
 }
 
 // ================== 工具函数 ==================
+
+// 🚀 极速 204 物理延迟探针
+async function getRealPing(node) {
+    return new Promise((resolve) => {
+        let start = Date.now();
+        // 访问 Cloudflare 的极速空网页，只测传输延迟
+        $httpClient.get({ url: "http://cp.cloudflare.com/generate_204", node: node, timeout: 3000 }, (err, resp) => {
+            if (err || !resp || (resp.status !== 200 && resp.status !== 204)) {
+                resolve(9999); // 探测失败返回极高延迟
+            } else {
+                resolve(Date.now() - start);
+            }
+        });
+    });
+}
 
 function extractASN(asnStr) {
     if (!asnStr) return "";
@@ -204,12 +225,13 @@ function translateISP(isp) {
     return isp; 
 }
 
+// 核心网络请求封装 (兼容了 204 状态码)
 function httpGet(opts) {
     return new Promise((resolve, reject) => {
         $httpClient.get(opts, (err, resp, data) => {
             if (err) return reject(err);
-            if (resp.status !== 200) return reject(new Error(`HTTP Error: ${resp.status}`));
-            resolve(data);
+            if (resp.status !== 200 && resp.status !== 204) return reject(new Error(`HTTP Error: ${resp.status}`));
+            resolve(data || resp.status);
         });
     });
 }
@@ -223,13 +245,11 @@ async function getIPInfo(ip, node = null) {
 
     for (let api of apis) {
         try {
-            let start = Date.now();
             let opts = { url: api.url, timeout: 4000 };
             if (node) opts.node = node; 
 
             let res = await httpGet(opts);
             let info = api.parser(res);
-            info.time = Date.now() - start;
             for(let key in info) { if(!info[key]) info[key] = ""; }
             return info;
         } catch (e) { continue; }
