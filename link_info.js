@@ -1,6 +1,6 @@
 /**
- * 节点入口落地查询 - 大一统积分风控版 (动态诊断完全体)
- * 架构：前置拓扑漏斗 (分流直连/中转) + 后置四维积分引擎 (精准评级) + 动态诊断标签
+ * 节点入口落地查询 - 大一统积分风控版 (终极白盒诊断版)
+ * 架构：前置拓扑漏斗 + 后置四维积分引擎 + 动态带分标签 + 海量汉化词库
  * 探针：引入 HTTP 204 极速探针，结合广东出海 +5% 宽容度物理红线
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
@@ -78,7 +78,7 @@ const Latency_Limits = {
             entranceInfo = { error: "INFailed 入口查询失败" };
         }
 
-        // 🧠 核心大脑：调用拓扑漏斗 + 四维积分引擎 + 动态标签
+        // 🧠 核心大脑：调用拓扑漏斗 + 四维积分引擎 + 动态白盒标签
         let cfw = evaluateNode(entranceInfo, landingInfo, nodeName, realPing);
 
         // UI 渲染：组装入口文本
@@ -108,7 +108,7 @@ const Latency_Limits = {
         <b><font>落地IP地址</font>:</b>
         <font>${HIP(landingInfo.ip, hideIP)}</font><br><br>
         <b><font>落地ISP</font>:</b>
-        <font>${landingInfo.isp}</font><br><br>
+        <font>${translateISP(landingInfo.isp)}</font><br><br>
         <b><font>落地ASN</font>:</b>
         <font>${landingInfo.asn}</font><br>`;
         }
@@ -135,7 +135,7 @@ const Latency_Limits = {
     }
 })();
 
-// ================== 核心：拓扑漏斗 + 四维积分引擎 + 动态诊断 ==================
+// ================== 核心：拓扑漏斗 + 四维积分引擎 + 白盒诊断 ==================
 
 function evaluateNode(ent, lnd, nodeName, realPing) {
     // 🔴 致命拦截：完全不通
@@ -151,33 +151,32 @@ function evaluateNode(ent, lnd, nodeName, realPing) {
         if (entASN && lndASN && entASN === lndASN) isDirect = true; 
     }
 
-    // ----------------- 模块二：定量 (四维积分算分与标签收集) -----------------
+    // ----------------- 模块二：定量 (四维积分与波动标签收集) -----------------
     let score = 0;
-    let posTags = []; // 加分亮点池
-    let negTags = []; // 扣分/平庸痛点池
+    let activeTags = []; // 只要产生分数波动，就扔进这个动态标签池，0分自动忽略
 
     // 维度 1: 👑 贵族 ASN (+3分)
     if (ASNDict[lndASN]) {
         score += 3;
-        posTags.push("贵族专网");
+        activeTags.push("+3 贵族专网");
     }
 
     // 维度 2: ☁️ CDN 伪装剥离 (-1分)
     if (ent.error || Blocked_IPs.includes(ent.ip)) {
         score -= 1;
-        negTags.push("入口隐藏");
+        activeTags.push("-1 入口盲测");
     } else {
         const isCDN_ISP = CDN_Keywords.some(k => (ent.isp || "").toLowerCase().includes(k));
         if (CDN_ASN.includes(entASN) || isCDN_ISP) {
             score -= 1;
-            negTags.push("CDN减速壳");
+            activeTags.push("-1 CDN减速壳");
         }
     }
 
     // 维度 3: 🏷️ 商家命名背书 (+1分)
     if (regex_Premium.test(nodeName) || regex_Endpoints.test(nodeName)) {
         score += 1;
-        posTags.push("专线背书");
+        activeTags.push("+1 专线背书");
     }
 
     // 维度 4: ⏱️ 物理延迟红线 (+3分 / +1分 / -1分)
@@ -193,30 +192,18 @@ function evaluateNode(ent, lnd, nodeName, realPing) {
 
     if (realPing <= fast_limit) {
         score += 3;
-        posTags.push("极速响应");
+        activeTags.push("+3 极速响应");
     } else if (realPing <= normal_limit) {
         score += 1;
-        posTags.push("延迟达标"); 
-        // 及格延迟不作为严重痛点，但如果在低分档，需要补充平庸标签
+        activeTags.push("+1 延迟达标"); 
     } else {
         score -= 1;
-        negTags.push("严重拥堵/绕路");
+        activeTags.push("-1 拥堵/绕路");
     }
 
-    // ----------------- 标签组装逻辑 -----------------
-    let tagsStr = "";
-    if (score >= 2) {
-        // 上两档：高分榜展示加分亮点
-        if (posTags.length > 0) {
-            tagsStr = " ｜ " + posTags.join(" · ");
-        }
-    } else {
-        // 下两档：避坑榜展示痛点。如果啥毛病没有就是慢，打上平庸标签
-        if (negTags.length === 0) {
-            negTags.push("平庸骨干网");
-        }
-        tagsStr = " ｜ " + negTags.join(" · ");
-    }
+    // ----------------- 标签组装 -----------------
+    // 把波动产生的所有标签拼接，没有波动的0分维度天然被过滤
+    let tagsStr = activeTags.length > 0 ? " ｜ " + activeTags.join(" · ") : "";
 
     // ----------------- 最终判决书输出 -----------------
     if (isDirect) {
@@ -253,16 +240,48 @@ function extractASN(asnStr) {
     return match ? match[0].toUpperCase() : "";
 }
 
+// 🌐 海量 IDC 汉化字典引擎 (扩充版)
 function translateISP(isp) {
     if (!isp) return "";
     const lowerISP = isp.toLowerCase();
+    
+    // --- 国内三大运营商及基础网络 ---
     if (lowerISP.includes("chinanet") || lowerISP.includes("telecom")) return "中国电信";
     if (lowerISP.includes("unicom")) return "中国联通";
     if (lowerISP.includes("mobile")) return "中国移动";
     if (lowerISP.includes("broadcasting") || lowerISP.includes("cbn")) return "中国广电";
-    if (lowerISP.includes("alibaba") || lowerISP.includes("alipay")) return "阿里云";
+    if (lowerISP.includes("drpeng") || lowerISP.includes("great wall")) return "长城宽带/鹏博士";
+    
+    // --- 国内主流云服务商 ---
+    if (lowerISP.includes("alibaba") || lowerISP.includes("alipay") || lowerISP.includes("taobao")) return "阿里云";
     if (lowerISP.includes("tencent")) return "腾讯云";
-    return isp; 
+    if (lowerISP.includes("huawei")) return "华为云";
+    if (lowerISP.includes("baidu")) return "百度云";
+    if (lowerISP.includes("ucloud")) return "优刻得 (UCloud)";
+    if (lowerISP.includes("bytedance") || lowerISP.includes("volce")) return "字节跳动 (火山引擎)";
+    if (lowerISP.includes("kingsoft")) return "金山云";
+    if (lowerISP.includes("jdcloud") || lowerISP.includes("jd.com")) return "京东云";
+    if (lowerISP.includes("qiniu")) return "七牛云";
+    
+    // --- 国内知名 IDC 数据中心 ---
+    if (lowerISP.includes("lesuyun")) return "乐速云 (Lesuyun)";
+    if (lowerISP.includes("vianet") || lowerISP.includes("century")) return "世纪互联";
+    if (lowerISP.includes("chinanetcenter") || lowerISP.includes("wangsu")) return "网宿科技";
+    
+    // --- 海外主流云服务商 / 常见机房 ---
+    if (lowerISP.includes("amazon") || lowerISP.includes("aws")) return "亚马逊 (AWS)";
+    if (lowerISP.includes("microsoft") || lowerISP.includes("azure")) return "微软 (Azure)";
+    if (lowerISP.includes("google")) return "谷歌云 (GCP)";
+    if (lowerISP.includes("oracle")) return "甲骨文 (Oracle)";
+    if (lowerISP.includes("digitalocean") || lowerISP.includes("digital ocean")) return "DigitalOcean";
+    if (lowerISP.includes("linode") || lowerISP.includes("akamai")) return "Akamai / Linode";
+    if (lowerISP.includes("vultr") || lowerISP.includes("choopa")) return "Vultr";
+    if (lowerISP.includes("cloudflare")) return "Cloudflare";
+    if (lowerISP.includes("hetzner")) return "Hetzner";
+    if (lowerISP.includes("ovh")) return "OVH";
+    if (lowerISP.includes("equinix")) return "Equinix";
+
+    return isp; // 未匹配到则原样输出
 }
 
 function httpGet(opts) {
