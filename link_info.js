@@ -1,5 +1,5 @@
 /**
- * 节点入口落地查询 - 终极融合优化版
+ * 节点入口落地查询 - 终极融合优化版 (提速+防崩版)
  * 结合了稳定的查询引擎与优美的UI界面，支持 直连/中转/专线 智能判断
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
@@ -9,29 +9,39 @@ const scriptName = "入口落地查询";
 (async () => {
     try {
         const loonInfo = typeof $loon !== "undefined" ? $loon.split(" ") : ["Loon", "Unknown", ""];
-        const inputParams = $environment.params;
-        const nodeName = inputParams.node;
-        const nodeIp = inputParams.nodeInfo.address;
+        const inputParams = $environment.params || {};
+        const nodeName = inputParams.node || "未知节点";
+        const nodeInfo = inputParams.nodeInfo || {};
+        const nodeAddress = nodeInfo.address || "";
         
         // 读取隐藏IP配置
         const hideIP = $persistentStore.read("是否隐藏真实IP") === "隐藏";
 
-        // 获取落地信息 (通过节点请求)
         let landingInfo = {};
-        try {
-            landingInfo = await getIPInfo("", nodeName);
-        } catch (e) {
-            landingInfo = { error: "LDFailed 落地查询超时或失败" };
-        }
-
-        // 获取入口信息 (解析域名后直连请求)
         let entranceInfo = {};
-        try {
-            let entranceIp = await resolveDomain(nodeIp);
-            entranceInfo = await getIPInfo(entranceIp, null);
-        } catch (e) {
-            entranceInfo = { error: "INFailed 入口查询超时或失败" };
-        }
+
+        // 🚀 优化点 1：使用 Promise.all 并发请求，大幅缩短查询时间
+        await Promise.all([
+            // 任务 A: 获取落地信息 (通过节点代理请求)
+            (async () => {
+                try {
+                    landingInfo = await getIPInfo("", nodeName);
+                } catch (e) {
+                    landingInfo = { error: "LDFailed 落地查询超时或失败" };
+                }
+            })(),
+            
+            // 任务 B: 获取入口信息 (解析域名后直连请求)
+            (async () => {
+                try {
+                    if (!nodeAddress) throw new Error("无节点地址");
+                    let entranceIp = await resolveDomain(nodeAddress);
+                    entranceInfo = await getIPInfo(entranceIp, null);
+                } catch (e) {
+                    entranceInfo = { error: "INFailed 入口查询超时或失败" };
+                }
+            })()
+        ]);
 
         // 链路类型判断逻辑
         let cfw = "⟦ 未知状态 ⟧";
@@ -130,7 +140,7 @@ function httpGet(opts) {
     });
 }
 
-// 核心 IP 查询逻辑 (带备用接口防超时)
+// 核心 IP 查询逻辑
 async function getIPInfo(ip, node = null) {
     const targetIp = ip ? `${ip}` : "";
     const apis = [
@@ -142,13 +152,12 @@ async function getIPInfo(ip, node = null) {
         try {
             let start = Date.now();
             let opts = { url: api.url, timeout: 4000 };
-            if (node) opts.node = node; // 如果传入了节点，则强制走代理节点
+            if (node) opts.node = node; 
 
             let res = await httpGet(opts);
             let info = api.parser(res);
             info.time = Date.now() - start;
             
-            // 简单清洗数据，防止出现 undefined
             for(let key in info) { if(!info[key]) info[key] = "-"; }
             return info;
         } catch (e) {
@@ -159,42 +168,41 @@ async function getIPInfo(ip, node = null) {
     throw new Error("所有IP查询接口均超时或受限");
 }
 
-// 解析 ip-api 数据格式
+// 🚀 优化点 2：增加默认值和容错处理，防止接口返回不规范导致 replace 崩溃
 function parseIpApi(data) {
     let json = JSON.parse(data);
     if (json.status !== 'success') throw new Error("API返回异常");
     return {
-        ip: json.query,
-        country: json.country.replace(/中国\s*/, ''),
-        countryCode: json.countryCode,
-        region: json.regionName,
-        city: json.city,
-        isp: json.isp || json.org,
-        asn: json.as
+        ip: json.query || "",
+        country: (json.country || "").replace(/中国\s*/, ''),
+        countryCode: json.countryCode || "",
+        region: json.regionName || "",
+        city: json.city || "",
+        isp: json.isp || json.org || "",
+        asn: json.as || ""
     };
 }
 
-// 解析 ip.sb 数据格式 (备用)
 function parseIpSb(data) {
     let json = JSON.parse(data);
     return {
-        ip: json.ip,
-        country: json.country.replace(/中国\s*/, ''),
-        countryCode: json.country_code,
-        region: json.region,
-        city: json.city,
-        isp: json.isp || json.organization,
+        ip: json.ip || "",
+        country: (json.country || "").replace(/中国\s*/, ''),
+        countryCode: json.country_code || "",
+        region: json.region || "",
+        city: json.city || "",
+        isp: json.isp || json.organization || "",
         asn: json.asn ? `AS${json.asn}` : ''
     };
 }
 
-// 域名解析 (如果节点地址是域名，需先解析出入口IP)
+// 域名解析
 async function resolveDomain(domain) {
-    if (/^[0-9.]+$/.test(domain) || /:/.test(domain)) return domain; // 如果已经是 IP 则直接返回
+    if (/^[0-9.]+$/.test(domain) || /:/.test(domain)) return domain; 
     try {
         let res = await httpGet({ url: `https://223.5.5.5/resolve?name=${domain}&type=A&short=1`, timeout: 3000 });
         let ips = JSON.parse(res);
-        if (ips && ips.length > 0) return ips[0];
+        if (ips && Array.isArray(ips) && ips.length > 0) return ips[0];
     } catch (e) {
         console.log("AliDNS 解析失败，直接使用原地址进行查询");
     }
