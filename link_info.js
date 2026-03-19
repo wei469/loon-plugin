@@ -1,7 +1,7 @@
 /**
- * 节点入口落地查询 - 大一统积分风控版 (终极形态)
- * 架构：前置拓扑漏斗 (分流直连/中转) + 后置四维积分引擎 (精准评级)
- * 探针：引入 HTTP 204 极速探针，结合广东出海物理红线
+ * 节点入口落地查询 - 大一统积分风控版 (动态诊断完全体)
+ * 架构：前置拓扑漏斗 (分流直连/中转) + 后置四维积分引擎 (精准评级) + 动态诊断标签
+ * 探针：引入 HTTP 204 极速探针，结合广东出海 +5% 宽容度物理红线
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
 
@@ -20,7 +20,7 @@ const ASNDict = {
     "AS9299": "PCCW Global"
 };
 
-// 2. ☁️ CDN 与伪装特征字典 (定级：-2分)
+// 2. ☁️ CDN 与伪装特征字典 (定级：-1分)
 const CDN_ASN = ["AS13335", "AS20940", "AS16625", "AS54113", "AS16509", "AS396982", "AS31898", "AS133199"];
 const CDN_Keywords = ["cloudflare", "akamai", "fastly", "amazon", "cloudfront", "cdn77", "imperva", "sucuri"];
 const Blocked_IPs = ["127.0.0.1", "0.0.0.0", "::1"];
@@ -29,18 +29,18 @@ const Blocked_IPs = ["127.0.0.1", "0.0.0.0", "::1"];
 const regex_Premium = /(IPLC|IEPL|专线|唯云|AIA|游戏)/i;
 const regex_Endpoints = /(深港|广港|莞港|沪日|沪韩|京德|京俄|广新|苏日)/i;
 
-// 4. ⏱️ 物理延迟红线阈值 (以中国广东为起点的探针红线，包含握手税)
+// 4. ⏱️ 物理延迟红线阈值 (广东视角 + 5% 网络抖动宽容度)
 const Latency_Limits = {
     // 港/澳
-    Zone_1: { keywords: /(港|HK|Hong Kong|澳|Macau)/i, fast: 60, normal: 120 },
+    Zone_1: { keywords: /(港|HK|Hong Kong|澳|Macau)/i, fast: 63, normal: 126 },
     // 台/新/马/菲
-    Zone_2: { keywords: /(台|TW|Taiwan|新|SG|Singapore|马|MY|Malaysia|菲|PH)/i, fast: 150, normal: 250 },
+    Zone_2: { keywords: /(台|TW|Taiwan|新|SG|Singapore|马|MY|Malaysia|菲|PH)/i, fast: 157, normal: 262 },
     // 日/韩
-    Zone_3: { keywords: /(日|JP|Japan|韩|KR|Korea)/i, fast: 180, normal: 300 },
+    Zone_3: { keywords: /(日|JP|Japan|韩|KR|Korea)/i, fast: 189, normal: 315 },
     // 美西/澳洲
-    Zone_4: { keywords: /(美|US|America|澳|AU|Australia)/i, fast: 420, normal: 600 },
+    Zone_4: { keywords: /(美|US|America|澳|AU|Australia)/i, fast: 441, normal: 630 },
     // 欧/美东及其他
-    Zone_5: { keywords: /(德|DE|英|UK|法|FR|欧|EU|俄|RU)/i, fast: 650, normal: 850 }
+    Zone_5: { keywords: /(德|DE|英|UK|法|FR|欧|EU|俄|RU)/i, fast: 682, normal: 892 }
 };
 
 // ================== 主程序执行入口 ==================
@@ -78,7 +78,7 @@ const Latency_Limits = {
             entranceInfo = { error: "INFailed 入口查询失败" };
         }
 
-        // 🧠 核心大脑：调用拓扑漏斗 + 四维积分引擎
+        // 🧠 核心大脑：调用拓扑漏斗 + 四维积分引擎 + 动态标签
         let cfw = evaluateNode(entranceInfo, landingInfo, nodeName, realPing);
 
         // UI 渲染：组装入口文本
@@ -135,7 +135,7 @@ const Latency_Limits = {
     }
 })();
 
-// ================== 核心：拓扑漏斗 + 四维积分引擎 ==================
+// ================== 核心：拓扑漏斗 + 四维积分引擎 + 动态诊断 ==================
 
 function evaluateNode(ent, lnd, nodeName, realPing) {
     // 🔴 致命拦截：完全不通
@@ -147,33 +147,37 @@ function evaluateNode(ent, lnd, nodeName, realPing) {
     // ----------------- 模块一：定性 (拓扑漏斗) -----------------
     let isDirect = false;
     if (!ent.error && ent.ip) {
-        if (ent.ip === lnd.ip) isDirect = true; // IP完全一致
-        if (entASN && lndASN && entASN === lndASN) isDirect = true; // 同机房同ASN
+        if (ent.ip === lnd.ip) isDirect = true; 
+        if (entASN && lndASN && entASN === lndASN) isDirect = true; 
     }
 
-    // ----------------- 模块二：定量 (四维积分算分) -----------------
+    // ----------------- 模块二：定量 (四维积分算分与标签收集) -----------------
     let score = 0;
-    let prefix = "";
+    let posTags = []; // 加分亮点池
+    let negTags = []; // 扣分/平庸痛点池
 
     // 维度 1: 👑 贵族 ASN (+3分)
     if (ASNDict[lndASN]) {
         score += 3;
+        posTags.push("贵族专网");
     }
 
-    // 维度 2: ☁️ CDN 伪装剥离 (-2分)
+    // 维度 2: ☁️ CDN 伪装剥离 (-1分)
     if (ent.error || Blocked_IPs.includes(ent.ip)) {
-        prefix = "❓盲测 | "; // 查不到入口，不加不扣，打上盲测标签
+        score -= 1;
+        negTags.push("入口隐藏");
     } else {
         const isCDN_ISP = CDN_Keywords.some(k => (ent.isp || "").toLowerCase().includes(k));
         if (CDN_ASN.includes(entASN) || isCDN_ISP) {
-            score -= 2;
-            prefix = "☁️CDN减速 | ";
+            score -= 1;
+            negTags.push("CDN减速壳");
         }
     }
 
     // 维度 3: 🏷️ 商家命名背书 (+1分)
     if (regex_Premium.test(nodeName) || regex_Endpoints.test(nodeName)) {
         score += 1;
+        posTags.push("专线背书");
     }
 
     // 维度 4: ⏱️ 物理延迟红线 (+3分 / +1分 / -1分)
@@ -181,42 +185,55 @@ function evaluateNode(ent, lnd, nodeName, realPing) {
     let fast_limit = 300; 
     let normal_limit = 500; 
     
-    // 匹配广东专属红线
     if (Latency_Limits.Zone_1.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_1.fast; normal_limit = Latency_Limits.Zone_1.normal; }
     else if (Latency_Limits.Zone_2.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_2.fast; normal_limit = Latency_Limits.Zone_2.normal; }
     else if (Latency_Limits.Zone_3.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_3.fast; normal_limit = Latency_Limits.Zone_3.normal; }
     else if (Latency_Limits.Zone_4.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_4.fast; normal_limit = Latency_Limits.Zone_4.normal; }
     else if (Latency_Limits.Zone_5.keywords.test(lndStr)) { fast_limit = Latency_Limits.Zone_5.fast; normal_limit = Latency_Limits.Zone_5.normal; }
 
-    // 计算延迟得分
     if (realPing <= fast_limit) {
         score += 3;
+        posTags.push("极速响应");
     } else if (realPing <= normal_limit) {
         score += 1;
+        posTags.push("延迟达标"); 
+        // 及格延迟不作为严重痛点，但如果在低分档，需要补充平庸标签
     } else {
         score -= 1;
+        negTags.push("严重拥堵/绕路");
+    }
+
+    // ----------------- 标签组装逻辑 -----------------
+    let tagsStr = "";
+    if (score >= 2) {
+        // 上两档：高分榜展示加分亮点
+        if (posTags.length > 0) {
+            tagsStr = " ｜ " + posTags.join(" · ");
+        }
+    } else {
+        // 下两档：避坑榜展示痛点。如果啥毛病没有就是慢，打上平庸标签
+        if (negTags.length === 0) {
+            negTags.push("平庸骨干网");
+        }
+        tagsStr = " ｜ " + negTags.join(" · ");
     }
 
     // ----------------- 最终判决书输出 -----------------
-    
     if (isDirect) {
-        // 🟢 直连系判决
-        if (score >= 4) return prefix + "⟦ 🚄 极品优化直连 ⟧";
-        if (score >= 2) return prefix + "⟦ 🚙 优质常规直连 ⟧";
-        if (score >= 0) return prefix + "⟦ 🐌 拥堵/平庸直连 ⟧";
-        return prefix + "⟦ ⚠️ 劣质直连 / 减速云 ⟧";
+        if (score >= 4) return `⟦ 🚄 极品优化直连${tagsStr} ⟧`;
+        if (score >= 2) return `⟦ 🚙 优质常规直连${tagsStr} ⟧`;
+        if (score >= 0) return `⟦ 🐌 拥堵/平庸直连${tagsStr} ⟧`;
+        return `⟦ ⚠️ 劣质直连/减速云${tagsStr} ⟧`;
     } else {
-        // 🔵 中转/专线系判决
-        if (score >= 4) return prefix + "⟦ 🚀 顶级物理专线 ⟧";
-        if (score >= 2) return prefix + "⟦ ⚡ 优质高能中转 ⟧";
-        if (score >= 0) return prefix + "⟦ ✈️ 常规公网中转 ⟧";
-        return prefix + "⟦ ⚠️ 劣质/减速节点 ⟧";
+        if (score >= 4) return `⟦ 🚀 顶级物理专线${tagsStr} ⟧`;
+        if (score >= 2) return `⟦ ⚡ 优质高能中转${tagsStr} ⟧`;
+        if (score >= 0) return `⟦ ✈️ 常规公网中转${tagsStr} ⟧`;
+        return `⟦ ⚠️ 劣质/减速节点${tagsStr} ⟧`;
     }
 }
 
 // ================== 工具函数 ==================
 
-// 极速 204 物理延迟探针
 async function getRealPing(node) {
     return new Promise((resolve) => {
         let start = Date.now();
