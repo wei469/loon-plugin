@@ -242,3 +242,4 @@ function getFlag(c) {
     if(code === "TW") return "🇨🇳"; // Emoji fallback
     try { return String.fromCodePoint(...code.split("").map(i=>127397+i.charCodeAt())); } catch (e) { return ""; }
 }
+
