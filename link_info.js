@@ -1,13 +1,13 @@
 /**
- * 节点入口落地查询 - 大一统积分风控版 (终极视觉优化版)
- * 架构：前置拓扑漏斗 + 后置四维积分引擎 + 极简纯文本诊断标签 + 海量汉化词库
- * 探针：引入 HTTP 204 极速探针，结合广东出海 +5% 宽容度物理红线
+ * 节点入口落地查询 - 大一统积分风控版 (纯粹物理唯物终极版)
+ * 架构：前置拓扑漏斗 + 后置三维积分引擎 + 极简诊断标签 + 海量汉化词库
+ * 核心：废除所有商家命名加分，绝对公平对决。引入广东出海 +5% 宽容度红线。
  * 仅支持 Loon - 在所有节点页面选择一个节点长按，出现菜单后进行测试
  */
 
 const scriptName = "入口落地智能分析";
 
-// ================== 核心配置与四大字典 ==================
+// ================== 核心配置与三大物理字典 ==================
 
 // 1. 👑 贵族 ASN 字典 (定级：+3分)
 const ASNDict = {
@@ -25,21 +25,12 @@ const CDN_ASN = ["AS13335", "AS20940", "AS16625", "AS54113", "AS16509", "AS39698
 const CDN_Keywords = ["cloudflare", "akamai", "fastly", "amazon", "cloudfront", "cdn77", "imperva", "sucuri"];
 const Blocked_IPs = ["127.0.0.1", "0.0.0.0", "::1"];
 
-// 3. 🏷️ 商家命名特征正则 (定级：+1分)
-const regex_Premium = /(IPLC|IEPL|专线|唯云|AIA|游戏)/i;
-const regex_Endpoints = /(深港|广港|莞港|沪日|沪韩|京德|京俄|广新|苏日)/i;
-
-// 4. ⏱️ 物理延迟红线阈值 (广东视角 + 5% 网络抖动宽容度)
+// 3. ⏱️ 物理延迟红线阈值 (广东视角 + 5% 网络抖动宽容度)
 const Latency_Limits = {
-    // 港/澳
     Zone_1: { keywords: /(港|HK|Hong Kong|澳|Macau)/i, fast: 63, normal: 126 },
-    // 台/新/马/菲
     Zone_2: { keywords: /(台|TW|Taiwan|新|SG|Singapore|马|MY|Malaysia|菲|PH)/i, fast: 157, normal: 262 },
-    // 日/韩
     Zone_3: { keywords: /(日|JP|Japan|韩|KR|Korea)/i, fast: 189, normal: 315 },
-    // 美西/澳洲
     Zone_4: { keywords: /(美|US|America|澳|AU|Australia)/i, fast: 441, normal: 630 },
-    // 欧/美东及其他
     Zone_5: { keywords: /(德|DE|英|UK|法|FR|欧|EU|俄|RU)/i, fast: 682, normal: 892 }
 };
 
@@ -54,13 +45,13 @@ const Latency_Limits = {
         
         const hideIP = $persistentStore.read("是否隐藏真实IP") === "隐藏";
 
-        // 严格顺序 1：获取落地信息 & 真实物理延迟
+        // 获取落地信息 & 真实物理延迟
         let landingInfo = {};
         let realPing = 9999; 
         try {
             const [ldRes, pingRes] = await Promise.all([
                 getIPInfo("", nodeName),
-                getRealPing(nodeName) // 触发 204 极速探针
+                getRealPing(nodeName) 
             ]);
             landingInfo = ldRes;
             realPing = pingRes;
@@ -68,7 +59,7 @@ const Latency_Limits = {
             landingInfo = { error: "LDFailed 落地查询超时或节点离线" };
         }
 
-        // 严格顺序 2：获取入口信息 (解析域名后直连请求)
+        // 获取入口信息
         let entranceInfo = {};
         try {
             if (!nodeAddress) throw new Error("无节点地址");
@@ -78,15 +69,12 @@ const Latency_Limits = {
             entranceInfo = { error: "INFailed 入口查询失败" };
         }
 
-        // 🧠 核心大脑：调用拓扑漏斗 + 四维积分引擎 + 极简诊断标签
-        let cfw = evaluateNode(entranceInfo, landingInfo, nodeName, realPing);
+        // 🧠 核心大脑：调用拓扑漏斗 + 三维积分引擎
+        let cfw = evaluateNode(entranceInfo, landingInfo, realPing);
 
-        // UI 渲染：组装入口文本
-        let ins = "";
-        if (entranceInfo.error) {
-            ins = `<br>${entranceInfo.error}<br><br>`;
-        } else {
-            ins = `<b><font>入口位置</font>:</b>
+        // UI 渲染
+        let ins = entranceInfo.error ? `<br>${entranceInfo.error}<br><br>` : 
+        `<b><font>入口位置</font>:</b>
         <font>${getflag(entranceInfo.countryCode)}${entranceInfo.country}</font><br><br>
         <b><font>入口地区</font>:</b>
         <font>${entranceInfo.region} ${entranceInfo.city}</font><br><br>
@@ -94,14 +82,9 @@ const Latency_Limits = {
         <font>${HIP(entranceInfo.ip, hideIP)}</font><br><br>
         <b><font>入口ISP</font>:</b>
         <font>${translateISP(entranceInfo.isp)}</font><br><br>`;
-        }
 
-        // UI 渲染：组装落地文本
-        let outs = "";
-        if (landingInfo.error) {
-            outs = `<br>${landingInfo.error}<br><br>`;
-        } else {
-            outs = `<b><font>落地位置</font>:</b>
+        let outs = landingInfo.error ? `<br>${landingInfo.error}<br><br>` : 
+        `<b><font>落地位置</font>:</b>
         <font>${getflag(landingInfo.countryCode)}${landingInfo.country}&nbsp; ⚡${realPing}ms</font><br><br>
         <b><font>落地地区</font>:</b>
         <font>${landingInfo.region} ${landingInfo.city}</font><br><br>
@@ -111,9 +94,7 @@ const Latency_Limits = {
         <font>${translateISP(landingInfo.isp)}</font><br><br>
         <b><font>落地ASN</font>:</b>
         <font>${landingInfo.asn}</font><br>`;
-        }
 
-        // 最终 HTML
         let message = `<p style="text-align: center; font-family: -apple-system; font-size: large; font-weight: thin">
     <br>-------------------------------<br><br>
     ${ins}
@@ -135,10 +116,9 @@ const Latency_Limits = {
     }
 })();
 
-// ================== 核心：拓扑漏斗 + 四维积分引擎 + 极简诊断 ==================
+// ================== 核心：拓扑漏斗 + 三维积分引擎 + 诊断标签 ==================
 
-function evaluateNode(ent, lnd, nodeName, realPing) {
-    // 🔴 致命拦截：完全不通
+function evaluateNode(ent, lnd, realPing) {
     if (lnd.error) return "⟦ ⚠️ 节点未通 / 代理失效 ⟧";
 
     let entASN = extractASN(ent.asn);
@@ -151,35 +131,30 @@ function evaluateNode(ent, lnd, nodeName, realPing) {
         if (entASN && lndASN && entASN === lndASN) isDirect = true; 
     }
 
-    // ----------------- 模块二：定量 (四维积分与极简标签收集) -----------------
+    // ----------------- 模块二：定量 (三维积分与标签收集) -----------------
     let score = 0;
-    let activeTags = []; // 只要产生分数波动，就扔进这个标签池，剥离了数字干扰
+    let posTags = []; // 加分项展示池
+    let negTags = []; // 扣分项展示池
 
     // 维度 1: 👑 贵族 ASN (+3分)
     if (ASNDict[lndASN]) {
         score += 3;
-        activeTags.push("贵族专网");
+        posTags.push("贵族专网");
     }
 
     // 维度 2: ☁️ CDN 伪装剥离 (-1分)
     if (ent.error || Blocked_IPs.includes(ent.ip)) {
         score -= 1;
-        activeTags.push("入口盲测");
+        negTags.push("入口盲测");
     } else {
         const isCDN_ISP = CDN_Keywords.some(k => (ent.isp || "").toLowerCase().includes(k));
         if (CDN_ASN.includes(entASN) || isCDN_ISP) {
             score -= 1;
-            activeTags.push("CDN减速壳");
+            negTags.push("CDN减速壳");
         }
     }
 
-    // 维度 3: 🏷️ 商家命名背书 (+1分)
-    if (regex_Premium.test(nodeName) || regex_Endpoints.test(nodeName)) {
-        score += 1;
-        activeTags.push("专线背书");
-    }
-
-    // 维度 4: ⏱️ 物理延迟红线 (+3分 / +1分 / -1分)
+    // 维度 3: ⏱️ 物理延迟红线 (+3分 / +1分 / -1分)
     const lndStr = `${lnd.country} ${lnd.region} ${lnd.city}`;
     let fast_limit = 300; 
     let normal_limit = 500; 
@@ -192,29 +167,35 @@ function evaluateNode(ent, lnd, nodeName, realPing) {
 
     if (realPing <= fast_limit) {
         score += 3;
-        activeTags.push("极速响应");
+        posTags.push("延迟极速");
     } else if (realPing <= normal_limit) {
         score += 1;
-        activeTags.push("延迟达标"); 
+        posTags.push("延迟达标"); 
     } else {
         score -= 1;
-        activeTags.push("拥堵/绕路");
+        negTags.push("延迟拥堵");
     }
 
-    // ----------------- 标签组装 -----------------
-    // 把波动产生的所有纯文字标签拼接，没有波动的0分维度天然被过滤
-    let tagsStr = activeTags.length > 0 ? " ｜ " + activeTags.join(" · ") : "";
+    // ----------------- 标签智能组装 -----------------
+    let tagsStr = "";
+    if (score >= 1) {
+        // 第一档、第二档：展示光荣的加分项
+        if (posTags.length > 0) tagsStr = " ｜ " + posTags.join(" · ");
+    } else {
+        // 第三档、第四档：扒下底裤，展示导致低分的痛点项
+        if (negTags.length > 0) tagsStr = " ｜ " + negTags.join(" · ");
+    }
 
-    // ----------------- 最终判决书输出 -----------------
+    // ----------------- 最终判决书输出 (前缀精简版) -----------------
     if (isDirect) {
-        if (score >= 4) return `⟦ 🚄 极品优化直连${tagsStr} ⟧`;
-        if (score >= 2) return `⟦ 🚙 优质常规直连${tagsStr} ⟧`;
-        if (score >= 0) return `⟦ 🐌 拥堵/平庸直连${tagsStr} ⟧`;
+        if (score >= 3) return `⟦ 🚄 极品直连${tagsStr} ⟧`;
+        if (score >= 1) return `⟦ 🚙 优质直连${tagsStr} ⟧`;
+        if (score === 0) return `⟦ 🐌 平庸直连${tagsStr} ⟧`;
         return `⟦ ⚠️ 劣质直连/减速云${tagsStr} ⟧`;
     } else {
-        if (score >= 4) return `⟦ 🚀 顶级物理专线${tagsStr} ⟧`;
-        if (score >= 2) return `⟦ ⚡ 优质高能中转${tagsStr} ⟧`;
-        if (score >= 0) return `⟦ ✈️ 常规公网中转${tagsStr} ⟧`;
+        if (score >= 3) return `⟦ 🚀 顶级专线${tagsStr} ⟧`;
+        if (score >= 1) return `⟦ ⚡ 优质中转${tagsStr} ⟧`;
+        if (score === 0) return `⟦ ✈️ 常规中转${tagsStr} ⟧`;
         return `⟦ ⚠️ 劣质/减速节点${tagsStr} ⟧`;
     }
 }
@@ -240,19 +221,19 @@ function extractASN(asnStr) {
     return match ? match[0].toUpperCase() : "";
 }
 
-// 🌐 海量 IDC 汉化字典引擎 (扩充版)
+// 🌐 海量 IDC 汉化字典引擎
 function translateISP(isp) {
     if (!isp) return "";
     const lowerISP = isp.toLowerCase();
     
-    // --- 国内三大运营商及基础网络 ---
+    // 国内三大运营商及基础网络
     if (lowerISP.includes("chinanet") || lowerISP.includes("telecom")) return "中国电信";
     if (lowerISP.includes("unicom")) return "中国联通";
     if (lowerISP.includes("mobile")) return "中国移动";
     if (lowerISP.includes("broadcasting") || lowerISP.includes("cbn")) return "中国广电";
     if (lowerISP.includes("drpeng") || lowerISP.includes("great wall")) return "长城宽带/鹏博士";
     
-    // --- 国内主流云服务商 ---
+    // 国内主流云服务商
     if (lowerISP.includes("alibaba") || lowerISP.includes("alipay") || lowerISP.includes("taobao")) return "阿里云";
     if (lowerISP.includes("tencent")) return "腾讯云";
     if (lowerISP.includes("huawei")) return "华为云";
@@ -263,12 +244,12 @@ function translateISP(isp) {
     if (lowerISP.includes("jdcloud") || lowerISP.includes("jd.com")) return "京东云";
     if (lowerISP.includes("qiniu")) return "七牛云";
     
-    // --- 国内知名 IDC 数据中心 ---
+    // 国内知名 IDC 数据中心
     if (lowerISP.includes("lesuyun")) return "乐速云 (Lesuyun)";
     if (lowerISP.includes("vianet") || lowerISP.includes("century")) return "世纪互联";
     if (lowerISP.includes("chinanetcenter") || lowerISP.includes("wangsu")) return "网宿科技";
     
-    // --- 海外主流云服务商 / 常见机房 ---
+    // 海外主流云服务商 / 常见机房
     if (lowerISP.includes("amazon") || lowerISP.includes("aws")) return "亚马逊 (AWS)";
     if (lowerISP.includes("microsoft") || lowerISP.includes("azure")) return "微软 (Azure)";
     if (lowerISP.includes("google")) return "谷歌云 (GCP)";
