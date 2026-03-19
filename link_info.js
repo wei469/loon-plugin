@@ -1,6 +1,6 @@
 /**
- * 节点入口落地查询 - 终极并发赛马版
- * 特性：高并发防超时机制 + 恢复本机IP显示 + 四维链路研判 + Emoji动感UI
+ * 节点入口落地查询 - 双接口极速赛马版
+ * 特性：剔除冗余接口 + 极限 3 秒防卡死 + 四维链路研判 + 专属段位图标
  * 适用：仅支持 Loon
  */
 
@@ -52,7 +52,7 @@ const scriptName = "入口落地查询";
             cfw = "⟦ ❌ 网络探测失败 ⟧";
         }
 
-        // 5. 组装 本机 UI (恢复经典布局)
+        // 5. 组装 本机 UI
         let localStr = "";
         if (localInfo.error) {
             localStr = `${localInfo.error}<br><br>`;
@@ -107,14 +107,14 @@ const scriptName = "入口落地查询";
     }
 })();
 
-// ================= 高并发赛马请求机制 =================
+// ================= 极速双路赛马请求机制 =================
 function fetchFastest(ip, nodeName = null) {
     return new Promise((resolve, reject) => {
         const targetIp = ip ? `/${ip}` : "";
+        // 砍掉多余接口，仅保留两大最稳主力
         const apis = [
             { url: `http://ip-api.com/json${targetIp}?lang=zh-CN`, parser: parseIpApi },
-            { url: `https://api-ipv4.ip.sb/geoip${targetIp}`, parser: parseIpSb },
-            { url: `https://ipinfo.io${targetIp}/json`, parser: parseIpInfo }
+            { url: `https://api-ipv4.ip.sb/geoip${targetIp}`, parser: parseIpSb }
         ];
         
         let errors = 0;
@@ -122,7 +122,8 @@ function fetchFastest(ip, nodeName = null) {
 
         apis.forEach(api => {
             let start = Date.now();
-            let opts = { url: api.url, timeout: 3500 }; // 单个接口超时缩短至3.5秒
+            // 极限压缩超时时间，3秒不出结果直接杀掉，防止卡顿
+            let opts = { url: api.url, timeout: 3000 }; 
             if (nodeName) opts.node = nodeName;
 
             $httpClient.get(opts, (err, resp, data) => {
@@ -133,14 +134,14 @@ function fetchFastest(ip, nodeName = null) {
                         info.time = Date.now() - start;
                         for(let key in info) { if(!info[key]) info[key] = "-"; }
                         resolved = true;
-                        resolve(info); // 谁最先解析成功，立刻采纳谁的数据
+                        resolve(info); 
                     } catch(e) {
                         errors++;
-                        if (errors === apis.length) reject(new Error("所有接口解析失败"));
+                        if (errors === apis.length) reject(new Error("解析失败"));
                     }
                 } else {
                     errors++;
-                    if (errors === apis.length) reject(new Error("所有接口请求超时"));
+                    if (errors === apis.length) reject(new Error("请求超时"));
                 }
             });
         });
@@ -197,16 +198,6 @@ function parseIpSb(data) {
         ip: json.ip, country: translateCountry(json.country), countryCode: json.country_code,
         region: json.region, city: json.city, isp: translateISP(json.isp || json.organization),
         asn: json.asn ? `AS${json.asn}` : "-"
-    };
-}
-
-function parseIpInfo(data) {
-    let json = JSON.parse(data);
-    if (json.bogon) throw new Error("保留IP");
-    return {
-        ip: json.ip, country: translateCountry(json.country), countryCode: json.country,
-        region: json.region, city: json.city, isp: translateISP(json.org),
-        asn: json.org ? json.org.split(" ")[0] : "-"
     };
 }
 
