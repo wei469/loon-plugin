@@ -3,8 +3,8 @@
  */
 
 const titleText = "网络质量 𝕏";
-const urlMain = "https://my.123169.xyz/v1/info";    // 主接口
-const urlBackup = "https://my.ippure.com/v1/info";  // 备用接口
+const urlMain = "https://my.ippure.com/v1/info";    // 主接口
+const urlBackup = "https://my.123169.xyz/v1/info";  // 备用接口
 
 // 回归最原生、最稳定的请求封装，不加任何干扰底层生命周期的 JS 计时器
 async function request(method, params) {
