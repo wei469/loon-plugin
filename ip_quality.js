@@ -1,12 +1,11 @@
 /*
- * 整合版 IP 信息查询脚本 (主备双引擎 - 纯原生请求版 + 数据源提示)
+ * 整合版 IP 信息查询脚本 (主备双引擎 - 修复卡死版)
  */
 
 const titleText = "网络质量 𝕏";
-const urlMain = "https://my.ippure.com/v1/info";    // 主接口
-const urlBackup = "https://my.123169.xyz/v1/info";  // 备用接口
+const urlMain = "https://my.123169.xyz/v1/info";    // 主接口
+const urlBackup = "https://my.ippure.com/v1/info";  // 备用接口
 
-// 回归最原生、最稳定的请求封装，不加任何干扰底层生命周期的 JS 计时器
 async function request(method, params) {
   return new Promise((resolve) => {
     const httpMethod = $httpClient[method.toLowerCase()];
@@ -16,7 +15,6 @@ async function request(method, params) {
   });
 }
 
-// 深度汉化字典
 function translate(text) {
   if (!text) return "";
   const dict = {
@@ -73,26 +71,30 @@ function getScoreLevel(score) {
 
 async function main() {
   const nodeName = $environment.params?.node;
-  let dataSource = "主接口"; // 初始化数据源标记
+  let dataSource = "主接口"; 
   
-  const reqParams = { url: urlMain };
-  if (nodeName) reqParams.node = nodeName;
+  // 修复点：直接传递全新的参数对象，并显式加入 5秒 的原生超时控制
+  let { error, response, data } = await request("GET", {
+    url: urlMain,
+    node: nodeName,
+    timeout: 5
+  });
 
-  // 1. 纯原生请求主接口
-  let { error, response, data } = await request("GET", reqParams);
-
-  // 2. 原生请求明确失败后，平滑切换备用接口，并修改数据源标记
+  // 主接口错误、超时、或无数据时，平滑切换备用
   if (error || !data) {
     dataSource = "备用接口";
-    reqParams.url = urlBackup;
-    const backupRes = await request("GET", reqParams);
+    const backupRes = await request("GET", {
+      url: urlBackup,
+      node: nodeName,
+      timeout: 5
+    });
     error = backupRes.error;
     response = backupRes.response;
     data = backupRes.data;
   }
 
   if (error || !data) {
-    return $done({ title: titleText, htmlMessage: "<b>网络请求失败</b>" });
+    return $done({ title: titleText, htmlMessage: "<b>网络请求失败或超时</b>" });
   }
 
   let json;
@@ -118,7 +120,7 @@ async function main() {
       ? `<span style="color:${level.color};">${score}% ${level.text}</span>`
       : `<span style="color:${level.color};">${level.text}</span>`;
 
-  // 非黑即白的严格布尔值判定
+  // 严谨的布尔值判断：非黑即白，明确判定为 true 才是住宅
   const isRes = (json.isResidential === true || json.isResidential === "true");
   const isBrd = (json.isBroadcast === true || json.isBroadcast === "true");
   
