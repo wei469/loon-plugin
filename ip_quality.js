@@ -1,11 +1,12 @@
 /*
- * 整合版 IP 信息查询脚本 (主备双引擎 - 修复卡死版)
+ * 整合版 IP 信息查询脚本 (主备双引擎 - 最终纯净修复版)
  */
 
 const titleText = "网络质量 𝕏";
 const urlMain = "https://my.123169.xyz/v1/info";    // 主接口
 const urlBackup = "https://my.ippure.com/v1/info";  // 备用接口
 
+// 纯原生请求封装，绝不掺杂会导致崩溃或瞬间报错的参数
 async function request(method, params) {
   return new Promise((resolve) => {
     const httpMethod = $httpClient[method.toLowerCase()];
@@ -15,6 +16,7 @@ async function request(method, params) {
   });
 }
 
+// 深度汉化字典
 function translate(text) {
   if (!text) return "";
   const dict = {
@@ -73,28 +75,27 @@ async function main() {
   const nodeName = $environment.params?.node;
   let dataSource = "主接口"; 
   
-  // 修复点：直接传递全新的参数对象，并显式加入 5秒 的原生超时控制
+  // 1. 独立且干净的请求对象：只传 url 和 node
   let { error, response, data } = await request("GET", {
     url: urlMain,
-    node: nodeName,
-    timeout: 5
+    node: nodeName
   });
 
-  // 主接口错误、超时、或无数据时，平滑切换备用
+  // 2. 主接口报错、无数据，平滑切换备用接口
   if (error || !data) {
     dataSource = "备用接口";
     const backupRes = await request("GET", {
       url: urlBackup,
-      node: nodeName,
-      timeout: 5
+      node: nodeName
     });
     error = backupRes.error;
     response = backupRes.response;
     data = backupRes.data;
   }
 
+  // 如果备用也彻底失败
   if (error || !data) {
-    return $done({ title: titleText, htmlMessage: "<b>网络请求失败或超时</b>" });
+    return $done({ title: titleText, htmlMessage: "<b>网络请求彻底超时或失败</b>" });
   }
 
   let json;
@@ -104,6 +105,7 @@ async function main() {
     return $done({ title: titleText, htmlMessage: "<b>JSON 数据无效</b>" });
   }
 
+  // 字段解析与汉化
   const ip = json.ipAddress || json.query || json.ip || "未知";
   const isp = translate(json.asOrganization) || "未知";
   const asn = json.asNumber || json.asn || (json.as && json.as.replace(/[^0-9]/g, "")) || "未知";
@@ -120,7 +122,7 @@ async function main() {
       ? `<span style="color:${level.color};">${score}% ${level.text}</span>`
       : `<span style="color:${level.color};">${level.text}</span>`;
 
-  // 严谨的布尔值判断：非黑即白，明确判定为 true 才是住宅
+  // 严谨布尔值判定：非黑即白，没明确说是住宅的，全算作机房
   const isRes = (json.isResidential === true || json.isResidential === "true");
   const isBrd = (json.isBroadcast === true || json.isBroadcast === "true");
   
@@ -130,6 +132,7 @@ async function main() {
   const brdColor = isBrd ? "#bb8f06" : "#12512a";
   const htmlType = `<span style="color:${typeColor};">${typeText}</span> • <span style="color:${brdColor};">${brdText}</span>`;
 
+  // 渲染极简 UI
   const html = `
 <div style="margin:0;padding:0;font-family:-apple-system;font-size:large;">
 
