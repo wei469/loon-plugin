@@ -1,6 +1,6 @@
 /*
- * 终极网络质量面板：三级引擎容灾版 (V3 最终版)
- * 特性：三级并发防卡死、完整中文化、非黑即白 UI 逻辑
+ * 终极网络质量面板：三级并发容灾版 (V4 并发竞速版)
+ * 特性：Promise.any 主备竞速、6秒宽容度防误杀、全量汉化、非黑即白判定
  */
 
 const titleText = "网络质量 𝕏";
@@ -8,9 +8,7 @@ const NODE_NAME = $environment.params?.node ?? "未知节点";
 
 // === 引擎配置 ===
 const ENGINE_1 = "https://my.123169.xyz/v1/info";
-// 备用引擎：已填入你提供的 ippure 接口
 const ENGINE_2 = "https://my.ippure.com/v1/info"; 
-// 兜底引擎：IP-API 加上了 lang=zh-CN 参数实现原生汉化
 const ENGINE_3 = "http://ip-api.com/json/?fields=status,countryCode,country,regionName,city,isp,as,mobile,proxy,hosting&lang=zh-CN";
 
 // === 简易汉化字典 ===
@@ -27,7 +25,6 @@ function translateCN(text) {
     "Oracle": "甲骨文", "DigitalOcean": "DigitalOcean",
     "Guangxi": "广西", "Nanning": "南宁", "Beijing": "北京", "Shanghai": "上海", "Guangdong": "广东"
   };
-  // 遍历替换，忽略大小写
   for (let key in dict) {
     t = t.replace(new RegExp(key, 'gi'), dict[key]);
   }
@@ -43,7 +40,7 @@ function requestWithTimeout(url, timeoutMs) {
       reject(new Error(`请求超时 (${timeoutMs}ms)`));
     }, timeoutMs);
 
-    // 必须指定 node 参数，强制流量走当前测试的节点，否则测的是直连本地 IP
+    // 强制流量走当前测试的节点
     const options = {
       url: url,
       node: NODE_NAME 
@@ -94,22 +91,18 @@ function parseMainEngine(json, engineName) {
   const flag = getFlagEmoji(json.countryCode);
   
   const rawLoc = [...new Set([json.country, json.region, json.city].filter(Boolean))].join(", ") || "未知";
-  
-  // 应用汉化字典
   const loc = (flag ? flag : "") + translateCN(rawLoc);
   const isp = translateCN(rawIsp);
 
   const score = json.fraudScore;
   const level = getScoreLevel(score);
   
-  // 【修改点】：非黑即白逻辑
-  // 只有接口明确返回了 isResidential 为 true，才认定为住宅。其他一律视为机房。
+  // 非黑即白逻辑：不明确是 true，统统当机房 / 原生处理
   const isRes = json.isResidential === true;
   let typeHtml = isRes 
     ? `<span style="color:#12512a;">🏠 住宅网络</span>` 
     : `<span style="color:#6aa312;">🏢 数据中心</span>`;
 
-  // 只有明确返回了 isBroadcast 为 true，才认定为广播。其他一律视为原生。
   const isBrd = json.isBroadcast === true;
   let brdHtml = isBrd 
     ? `<span style="color:#bb8f06;">📡 广播</span>` 
@@ -133,7 +126,6 @@ function parseFallbackEngine(json) {
   const asn = (json.as && json.as.split(" ")[0].replace("AS", "")) || "未知";
   const flag = getFlagEmoji(json.countryCode);
   
-  // IP-API 因为加了 lang=zh-CN，自带部分中文，再用字典兜底翻译一次
   const rawLoc = [...new Set([json.country, json.regionName, json.city].filter(Boolean))].join(", ") || "未知";
   const loc = (flag ? flag : "") + translateCN(rawLoc);
 
@@ -152,31 +144,29 @@ function parseFallbackEngine(json) {
     engine: "兜底引擎",
     ip, loc, isp, asn,
     scoreHtml: `<span style="color:gray;">N/A - 未知 (兜底模式)</span>`,
-    attrHtml: typeHtml // 兜底引擎不提供广播/原生的虚假猜测
+    attrHtml: typeHtml 
   };
 }
 
-// === 主程序流 ===
+// === 主程序流 (并发竞速核心) ===
 async function main() {
   let standardData = null;
 
+  // 1. 包装两个并发任务，给予 6 秒的充足时间
+  const task1 = requestWithTimeout(ENGINE_1, 6000).then(data => parseMainEngine(data, "主引擎"));
+  const task2 = requestWithTimeout(ENGINE_2, 6000).then(data => parseMainEngine(data, "备用引擎"));
+
   try {
-    // 🥇 第一级：主引擎 (3秒超时)
-    const data1 = await requestWithTimeout(ENGINE_1, 3000);
-    standardData = parseMainEngine(data1, "主引擎");
-  } catch (e1) {
+    // 2. 发令枪响：主备引擎同时起跑！谁先回来用谁的！
+    standardData = await Promise.any([task1, task2]);
+  } catch (aggregateError) {
+    // 3. 只有当任务 1 和 2 都在 6 秒内阵亡（报错或超时），才会进入兜底
     try {
-      // 🥈 第二级：备用引擎 ippure (3秒超时)
-      const data2 = await requestWithTimeout(ENGINE_2, 3000);
-      standardData = parseMainEngine(data2, "备用引擎");
-    } catch (e2) {
-      try {
-        // 🥉 第三级：兜底引擎 IP-API (4秒超时)
-        const data3 = await requestWithTimeout(ENGINE_3, 4000);
-        standardData = parseFallbackEngine(data3);
-      } catch (e3) {
-        return $done({ title: titleText, htmlMessage: "<b>网络极差，三级API全部响应超时或失败。</b>" });
-      }
+      // 兜底引擎给 4 秒时间
+      const data3 = await requestWithTimeout(ENGINE_3, 4000);
+      standardData = parseFallbackEngine(data3);
+    } catch (e3) {
+      return $done({ title: titleText, htmlMessage: "<b>网络极差，三级API全部响应失败或超时。</b>" });
     }
   }
 
