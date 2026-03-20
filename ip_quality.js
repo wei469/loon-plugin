@@ -1,12 +1,13 @@
 /*
- * 整合版 IP 信息查询脚本 (主备双引擎 - 最终纯净修复版)
- */
-
+ *
+ *
+by https://raw.githubusercontent.com/sooyaaabo/Loon/main/Script/IPPure/IPPure.js
+*
+*
+*/
 const titleText = "网络质量 𝕏";
-const urlMain = "https://my.123169.xyz/v1/info";    // 主接口
-const urlBackup = "https://my.ippure.com/v1/info";  // 备用接口
+const url = "https://my.123169.xyz/v1/info";
 
-// 纯原生请求封装，绝不掺杂会导致崩溃或瞬间报错的参数
 async function request(method, params) {
   return new Promise((resolve) => {
     const httpMethod = $httpClient[method.toLowerCase()];
@@ -14,41 +15,6 @@ async function request(method, params) {
       resolve({ error, response, data });
     });
   });
-}
-
-// 深度汉化字典
-function translate(text) {
-  if (!text) return "";
-  const dict = {
-    "United States": "美国", "Japan": "日本", "Taiwan": "台湾", "Hong Kong": "香港", 
-    "Singapore": "新加坡", "United Kingdom": "英国", "Korea": "韩国", "China": "中国",
-    "Malaysia": "马来西亚", "Germany": "德国", "France": "法国", "Australia": "澳大利亚",
-    "Tokyo": "东京", "Osaka": "大阪", "Taipei": "台北", "New Taipei": "新北",
-    "Los Angeles": "洛杉矶", "San Jose": "圣何塞", "New York": "纽约", "Seattle": "西雅图",
-    "Seoul": "首尔", "London": "伦敦", "Frankfurt": "法兰克福", "Sydney": "悉尼",
-    "Chunghwa Telecom": "中华电信", "HiNet": "中华电信", "Chief Telecom": "是方电讯",
-    "Amazon": "亚马逊", "Amazon.com": "亚马逊 (AWS)", "Google": "谷歌 (GCP)",
-    "Microsoft": "微软 (Azure)", "Cloudflare": "Cloudflare", "Alibaba": "阿里云",
-    "Tencent": "腾讯云", "Oracle": "甲骨文", "DigitalOcean": "DigitalOcean",
-    "Linode": "Linode", "Akamai": "Akamai", "Vultr": "Vultr", "Hetzner": "Hetzner",
-    "OVH": "OVH", "Starlink": "星链", "PCCW": "电讯盈科", "HKT": "香港电讯",
-    "HKBN": "香港宽频", "CMHK": "中国移动香港", "CHT": "中华电信",
-    "KDDI": "KDDI", "SoftBank": "软银", "NTT": "NTT", "IIJ": "IIJ",
-    "SingTel": "新电信", "StarHub": "星和电信"
-  };
-
-  let result = text;
-  for (const [en, zh] of Object.entries(dict)) {
-    const regex = new RegExp(`\\b${en}\\b`, 'gi');
-    result = result.replace(regex, zh);
-  }
-  for (const [en, zh] of Object.entries(dict)) {
-    if (result.toLowerCase().includes(en.toLowerCase())) {
-        const regex = new RegExp(en, 'gi');
-        result = result.replace(regex, zh);
-    }
-  }
-  return result;
 }
 
 function getFlagEmoji(code) {
@@ -73,29 +39,10 @@ function getScoreLevel(score) {
 
 async function main() {
   const nodeName = $environment.params?.node;
-  let dataSource = "主接口"; 
-  
-  // 1. 独立且干净的请求对象：只传 url 和 node
-  let { error, response, data } = await request("GET", {
-    url: urlMain,
-    node: nodeName
-  });
+  const { error, response, data } = await request("GET", { url, node: nodeName });
 
-  // 2. 主接口报错、无数据，平滑切换备用接口
   if (error || !data) {
-    dataSource = "备用接口";
-    const backupRes = await request("GET", {
-      url: urlBackup,
-      node: nodeName
-    });
-    error = backupRes.error;
-    response = backupRes.response;
-    data = backupRes.data;
-  }
-
-  // 如果备用也彻底失败
-  if (error || !data) {
-    return $done({ title: titleText, htmlMessage: "<b>网络请求彻底超时或失败</b>" });
+    return $done({ title: titleText, htmlMessage: "<b>网络错误</b>" });
   }
 
   let json;
@@ -105,14 +52,11 @@ async function main() {
     return $done({ title: titleText, htmlMessage: "<b>JSON 数据无效</b>" });
   }
 
-  // 字段解析与汉化
   const ip = json.ipAddress || json.query || json.ip || "未知";
-  const isp = translate(json.asOrganization) || "未知";
+  const isp = json.asOrganization || "未知";
   const asn = json.asNumber || json.asn || (json.as && json.as.replace(/[^0-9]/g, "")) || "未知";
   const flag = getFlagEmoji(json.countryCode);
-  
-  const rawLoc = [...new Set([json.country, json.region, json.city].filter(Boolean))].join(", ");
-  const loc = (flag ? flag : "") + (translate(rawLoc) || "未知");
+  const loc = (flag ? flag : "") + [...new Set([json.country, json.region, json.city].filter(Boolean))].join(", ") || "未知";
 
   const score = json.fraudScore;
   const level = getScoreLevel(score);
@@ -122,17 +66,14 @@ async function main() {
       ? `<span style="color:${level.color};">${score}% ${level.text}</span>`
       : `<span style="color:${level.color};">${level.text}</span>`;
 
-  // 严谨布尔值判定：非黑即白，没明确说是住宅的，全算作机房
-  const isRes = (json.isResidential === true || json.isResidential === "true");
-  const isBrd = (json.isBroadcast === true || json.isBroadcast === "true");
-  
+  const isRes = Boolean(json.isResidential);
+  const isBrd = Boolean(json.isBroadcast);
   const typeText = isRes ? "🏠 住宅网络" : "🏢 数据中心";
   const brdText = isBrd ? "📡 广播" : "🌐 原生";
   const typeColor = isRes ? "#12512a" : "#6aa312";
   const brdColor = isBrd ? "#bb8f06" : "#12512a";
   const htmlType = `<span style="color:${typeColor};">${typeText}</span> • <span style="color:${brdColor};">${brdText}</span>`;
 
-  // 渲染极简 UI
   const html = `
 <div style="margin:0;padding:0;font-family:-apple-system;font-size:large;">
 
@@ -145,7 +86,6 @@ async function main() {
 
 <div>
 <b>节点</b> ➟ <span style="color:${level.color};">${nodeName ?? "未知节点"}</span>
-<span style="font-size:13px; color:#888; float:right; margin-top:2px;">(${dataSource})</span>
 </div>
 
 </div>
@@ -158,6 +98,6 @@ async function main() {
   try {
     await main();
   } catch (e) {
-    $done({ title: titleText, htmlMessage: "<b>脚本异常：</b>" + e.message });
+    $done({ title: titleText, htmlMessage: "<b>脚本错误：</b>" + e.message });
   }
 })();
