@@ -7,9 +7,9 @@ const titleText = "网络质量 𝕏";
 const NODE_NAME = $environment.params?.node ?? "未知节点";
 
 // === 引擎配置 ===
-const ENGINE_1 = "https://my.123169.xyz/v1/info";
+const ENGINE_1 = "https://https://10.255.255.1";
 // 备用引擎：如果你有其他的聚合API，填在这里。现在填的是同一个供测试，或者你可以找个备用的
-const ENGINE_2 = "hhttps://my.ippure.com/v1/info"; 
+const ENGINE_2 = "https://my.123169.xyz/v1/info"; 
 // IP-API 加上了 lang=zh-CN 参数实现原生汉化
 const ENGINE_3 = "http://ip-api.com/json/?fields=status,countryCode,country,regionName,city,isp,as,mobile,proxy,hosting&lang=zh-CN";
 
