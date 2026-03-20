@@ -1,16 +1,16 @@
 /*
- * 终极网络质量面板：三级引擎容灾版 (V2 修补版)
- * 修复：强制节点路由、增加全量汉化翻译
+ * 终极网络质量面板：三级引擎容灾版 (V3 最终版)
+ * 特性：三级并发防卡死、完整中文化、非黑即白 UI 逻辑
  */
 
 const titleText = "网络质量 𝕏";
 const NODE_NAME = $environment.params?.node ?? "未知节点";
 
 // === 引擎配置 ===
-const ENGINE_1 = "https://my.ippure.com/v1/info";
-// 备用引擎：如果你有其他的聚合API，填在这里。现在填的是同一个供测试，或者你可以找个备用的
-const ENGINE_2 = "https://my.123169.xyz/v1/info"; 
-// IP-API 加上了 lang=zh-CN 参数实现原生汉化
+const ENGINE_1 = "https://my.123169.xyz/v1/info";
+// 备用引擎：已填入你提供的 ippure 接口
+const ENGINE_2 = "https://my.ippure.com/v1/info"; 
+// 兜底引擎：IP-API 加上了 lang=zh-CN 参数实现原生汉化
 const ENGINE_3 = "http://ip-api.com/json/?fields=status,countryCode,country,regionName,city,isp,as,mobile,proxy,hosting&lang=zh-CN";
 
 // === 简易汉化字典 ===
@@ -24,6 +24,7 @@ function translateCN(text) {
     "CHINANET": "中国电信", "UNICOM": "中国联通", "MOBILE": "中国移动",
     "PROVINCE NETWORK": "省网", "Tencent": "腾讯", "Alibaba": "阿里巴巴",
     "Google": "谷歌", "Amazon": "亚马逊", "Microsoft": "微软", "Cloudflare": "Cloudflare",
+    "Oracle": "甲骨文", "DigitalOcean": "DigitalOcean",
     "Guangxi": "广西", "Nanning": "南宁", "Beijing": "北京", "Shanghai": "上海", "Guangdong": "广东"
   };
   // 遍历替换，忽略大小写
@@ -42,7 +43,7 @@ function requestWithTimeout(url, timeoutMs) {
       reject(new Error(`请求超时 (${timeoutMs}ms)`));
     }, timeoutMs);
 
-    // 修复大Bug：必须指定 node，否则默认直连测的是本机IP！
+    // 必须指定 node 参数，强制流量走当前测试的节点，否则测的是直连本地 IP
     const options = {
       url: url,
       node: NODE_NAME 
@@ -94,30 +95,32 @@ function parseMainEngine(json, engineName) {
   
   const rawLoc = [...new Set([json.country, json.region, json.city].filter(Boolean))].join(", ") || "未知";
   
-  // 应用汉化
+  // 应用汉化字典
   const loc = (flag ? flag : "") + translateCN(rawLoc);
   const isp = translateCN(rawIsp);
 
   const score = json.fraudScore;
   const level = getScoreLevel(score);
   
+  // 【修改点】：非黑即白逻辑
+  // 只有接口明确返回了 isResidential 为 true，才认定为住宅。其他一律视为机房。
   const isRes = json.isResidential === true;
+  let typeHtml = isRes 
+    ? `<span style="color:#12512a;">🏠 住宅网络</span>` 
+    : `<span style="color:#6aa312;">🏢 数据中心</span>`;
+
+  // 只有明确返回了 isBroadcast 为 true，才认定为广播。其他一律视为原生。
   const isBrd = json.isBroadcast === true;
-  const isDc = json.isResidential === false; 
-
-  let typeHtml = "";
-  if (isRes) typeHtml = `<span style="color:#12512a;">🏠 住宅网络</span>`;
-  else if (isDc) typeHtml = `<span style="color:#6aa312;">🏢 数据中心</span>`;
-  else typeHtml = `<span style="color:gray;">❓ 属性未知</span>`;
-
-  let brdHtml = isBrd ? `<span style="color:#bb8f06;">📡 广播</span>` : `<span style="color:#12512a;">🌐 原生</span>`;
+  let brdHtml = isBrd 
+    ? `<span style="color:#bb8f06;">📡 广播</span>` 
+    : `<span style="color:#12512a;">🌐 原生</span>`;
 
   return {
     engine: engineName,
     ip, loc, isp, asn,
     scoreHtml: (score !== null && score !== undefined && score !== "N/A" && score !== "") 
                ? `<span style="color:${level.color};">${score}% ${level.text}</span>`
-               : `<span style="color:gray;">风险系数未知</span>`,
+               : `<span style="color:gray;">N/A - 未知</span>`,
     attrHtml: `${typeHtml} • ${brdHtml}`
   };
 }
@@ -130,7 +133,7 @@ function parseFallbackEngine(json) {
   const asn = (json.as && json.as.split(" ")[0].replace("AS", "")) || "未知";
   const flag = getFlagEmoji(json.countryCode);
   
-  // IP-API 因为加了 lang=zh-CN，自带部分中文，再用字典兜底翻译一次以防万一
+  // IP-API 因为加了 lang=zh-CN，自带部分中文，再用字典兜底翻译一次
   const rawLoc = [...new Set([json.country, json.regionName, json.city].filter(Boolean))].join(", ") || "未知";
   const loc = (flag ? flag : "") + translateCN(rawLoc);
 
@@ -148,8 +151,8 @@ function parseFallbackEngine(json) {
   return {
     engine: "兜底引擎",
     ip, loc, isp, asn,
-    scoreHtml: `<span style="color:gray;">风险系数未知 (兜底模式)</span>`,
-    attrHtml: typeHtml 
+    scoreHtml: `<span style="color:gray;">N/A - 未知 (兜底模式)</span>`,
+    attrHtml: typeHtml // 兜底引擎不提供广播/原生的虚假猜测
   };
 }
 
@@ -158,14 +161,17 @@ async function main() {
   let standardData = null;
 
   try {
+    // 🥇 第一级：主引擎 (3秒超时)
     const data1 = await requestWithTimeout(ENGINE_1, 3000);
     standardData = parseMainEngine(data1, "主引擎");
   } catch (e1) {
     try {
+      // 🥈 第二级：备用引擎 ippure (3秒超时)
       const data2 = await requestWithTimeout(ENGINE_2, 3000);
       standardData = parseMainEngine(data2, "备用引擎");
     } catch (e2) {
       try {
+        // 🥉 第三级：兜底引擎 IP-API (4秒超时)
         const data3 = await requestWithTimeout(ENGINE_3, 4000);
         standardData = parseFallbackEngine(data3);
       } catch (e3) {
