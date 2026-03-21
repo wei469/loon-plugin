@@ -1,15 +1,19 @@
 /*
- * 终极网络质量面板：串行容灾版 (V3 方案A 延长超时版)
- * 特性：6秒宽容度防误杀、全量汉化、非黑即白判定、串行排队降级
+ * 终极网络质量面板：V6 双雷达并发扫描版
+ * 特性：主副接口5秒并发交叉验证、上下分层UI、去重择优展示
  */
 
 const titleText = "网络质量 𝕏";
 const NODE_NAME = $environment.params?.node ?? "未知节点";
 
-// === 引擎配置 ===
-const ENGINE_1 = "https://my.123169.xyz/v1/info";
-const ENGINE_2 = "https://my.ippure.com/v1/info"; 
-const ENGINE_3 = "http://ip-api.com/json/?fields=status,countryCode,country,regionName,city,isp,as,mobile,proxy,hosting&lang=zh-CN";
+// === 接口配置 ===
+// 主接口 (负责深度风控、原生/广播判定)
+const ENGINE_MAIN = "https://my.123169.xyz/v1/info";
+// 备用双胞胎接口 (留作备用注释，需要时替换上方主接口)
+// const ENGINE_MAIN_BACKUP = "https://my.ippure.com/v1/info"; 
+
+// 测绘接口 (负责精准定位、ISP/ASN、代理/机房基础画像)
+const ENGINE_IPAPI = "http://ip-api.com/json/?fields=status,countryCode,country,regionName,city,isp,as,mobile,proxy,hosting&lang=zh-CN";
 
 // === 简易汉化字典 ===
 function translateCN(text) {
@@ -31,31 +35,26 @@ function translateCN(text) {
   return t;
 }
 
-// === 核心：带超时的节点请求 ===
-function requestWithTimeout(url, timeoutMs) {
-  return new Promise((resolve, reject) => {
+// === 核心：绝对安全的并发请求封装 ===
+// 无论成功还是失败，都会 resolve 返回结果，绝不抛出异常导致进程崩溃
+function safeRequest(url, timeoutMs) {
+  return new Promise((resolve) => {
     let isTimeout = false;
     const timer = setTimeout(() => {
       isTimeout = true;
-      reject(new Error(`请求超时 (${timeoutMs}ms)`));
+      resolve({ error: "超时拦截", data: null });
     }, timeoutMs);
 
-    const options = {
-      url: url,
-      node: NODE_NAME 
-    };
-
-    $httpClient.get(options, (error, response, data) => {
+    $httpClient.get({ url: url, node: NODE_NAME }, (error, response, data) => {
       if (isTimeout) return;
       clearTimeout(timer);
       if (error) {
-        reject(error);
+        resolve({ error: "请求失败", data: null });
       } else {
         try {
-          const json = JSON.parse(data);
-          resolve(json);
+          resolve({ error: null, data: JSON.parse(data) });
         } catch (e) {
-          reject(new Error("JSON 解析失败"));
+          resolve({ error: "JSON解析失败", data: null });
         }
       }
     });
@@ -72,115 +71,90 @@ function getFlagEmoji(code) {
 
 function getScoreLevel(score) {
   const s = Number(score);
-  if (isNaN(s)) return { text: "风险系数未知", color: "gray" };
+  if (isNaN(s)) return { text: "风险未知", color: "gray" };
   if (s >= 0 && s <= 15) return { text: "极度纯净 🟢", color: "#12512a" };
   if (s >= 16 && s <= 25) return { text: "纯净 ✅", color: "#1b9e4b" };
   if (s >= 26 && s <= 40) return { text: "中性 🟩", color: "#6aa312" };
   if (s >= 41 && s <= 50) return { text: "轻度风险 🟡", color: "#bb8f06" };
   if (s >= 51 && s <= 70) return { text: "中度风险 🟠", color: "#be5105" };
   if (s >= 71 && s <= 100) return { text: "极度风险 🔴", color: "#ae1c1c" };
-  return { text: "风险系数未知", color: "gray" };
+  return { text: "风险未知", color: "gray" };
 }
 
-// === 数据适配器 ===
-function parseMainEngine(json, engineName) {
-  const ip = json.ipAddress || json.query || json.ip || "未知";
-  const rawIsp = json.asOrganization || json.isp || "未知";
-  const asn = json.asNumber || json.asn || (json.as && json.as.replace(/[^0-9]/g, "")) || "未知";
-  const flag = getFlagEmoji(json.countryCode);
-  
-  const rawLoc = [...new Set([json.country, json.region, json.city].filter(Boolean))].join(", ") || "未知";
-  const loc = (flag ? flag : "") + translateCN(rawLoc);
-  const isp = translateCN(rawIsp);
-
-  const score = json.fraudScore;
-  const level = getScoreLevel(score);
-  
-  const isRes = json.isResidential === true;
-  let typeHtml = isRes 
-    ? `<span style="color:#12512a;">🏠 住宅网络</span>` 
-    : `<span style="color:#6aa312;">🏢 数据中心</span>`;
-
-  const isBrd = json.isBroadcast === true;
-  let brdHtml = isBrd 
-    ? `<span style="color:#bb8f06;">📡 广播</span>` 
-    : `<span style="color:#12512a;">🌐 原生</span>`;
-
-  return {
-    engine: engineName,
-    ip, loc, isp, asn,
-    scoreHtml: (score !== null && score !== undefined && score !== "N/A" && score !== "") 
-               ? `<span style="color:${level.color};">${score}% ${level.text}</span>`
-               : `<span style="color:gray;">N/A - 未知</span>`,
-    attrHtml: `${typeHtml} • ${brdHtml}`
-  };
-}
-
-function parseFallbackEngine(json) {
-  if (json.status !== "success") throw new Error("IP-API 返回错误");
-  
-  const ip = json.query || "未知";
-  const isp = translateCN(json.isp || "未知");
-  const asn = (json.as && json.as.split(" ")[0].replace("AS", "")) || "未知";
-  const flag = getFlagEmoji(json.countryCode);
-  
-  const rawLoc = [...new Set([json.country, json.regionName, json.city].filter(Boolean))].join(", ") || "未知";
-  const loc = (flag ? flag : "") + translateCN(rawLoc);
-
-  let typeHtml = "";
-  if (json.proxy === true) {
-    typeHtml = `<span style="color:#ae1c1c;">⚠️ 已知代理</span>`;
-  } else if (json.hosting === true) {
-    typeHtml = `<span style="color:#6aa312;">🏢 数据中心</span>`;
-  } else if (json.mobile === true) {
-    typeHtml = `<span style="color:#1b9e4b;">📱 蜂窝网络</span>`;
-  } else {
-    typeHtml = `<span style="color:#12512a;">🏠 住宅家宽</span>`;
-  }
-
-  return {
-    engine: "兜底引擎",
-    ip, loc, isp, asn,
-    scoreHtml: `<span style="color:gray;">N/A - 未知 (兜底模式)</span>`,
-    attrHtml: typeHtml 
-  };
-}
-
-// === 主程序流 ===
+// === 主程序流 (双雷达并发核心) ===
 async function main() {
-  let standardData = null;
+  // 1. 发令枪响！两个接口同时在 5 秒倒计时内冲刺
+  const [mainRes, ipapiRes] = await Promise.all([
+    safeRequest(ENGINE_MAIN, 5000),
+    safeRequest(ENGINE_IPAPI, 5000)
+  ]);
 
-  try {
-    // 🥇 第一级：主引擎 (放宽至 6 秒)
-    const data1 = await requestWithTimeout(ENGINE_1, 6000);
-    standardData = parseMainEngine(data1, "主引擎");
-  } catch (e1) {
-    try {
-      // 🥈 第二级：备用引擎 (放宽至 6 秒)
-      const data2 = await requestWithTimeout(ENGINE_2, 6000);
-      standardData = parseMainEngine(data2, "备用引擎");
-    } catch (e2) {
-      try {
-        // 🥉 第三级：兜底引擎 (放宽至 4 秒)
-        const data3 = await requestWithTimeout(ENGINE_3, 4000);
-        standardData = parseFallbackEngine(data3);
-      } catch (e3) {
-        return $done({ title: titleText, htmlMessage: "<b>网络极差，三级API全部响应超时或失败。</b>" });
-      }
-    }
+  // 2. 解析基础信息 (优先采信极其精准的 IP-API)
+  let baseInfo = { ip: "未知", loc: "未知", isp: "未知", asn: "未知", tags: `<span style="color:gray;">扫描失败/超时</span>` };
+  
+  if (!ipapiRes.error && ipapiRes.data && ipapiRes.data.status === "success") {
+    const d = ipapiRes.data;
+    baseInfo.ip = d.query || "未知";
+    const flag = getFlagEmoji(d.countryCode);
+    const rawLoc = [...new Set([d.country, d.regionName, d.city].filter(Boolean))].join(", ") || "未知";
+    baseInfo.loc = flag + translateCN(rawLoc);
+    baseInfo.isp = translateCN(d.isp || "未知");
+    baseInfo.asn = (d.as && d.as.split(" ")[0].replace("AS", "")) || "未知";
+
+    // IP-API 的专属画像打标
+    if (d.proxy === true) baseInfo.tags = `<span style="color:#ae1c1c;">⚠️ 已知代理</span>`;
+    else if (d.hosting === true) baseInfo.tags = `<span style="color:#6aa312;">🏢 数据中心</span>`;
+    else if (d.mobile === true) baseInfo.tags = `<span style="color:#1b9e4b;">📱 蜂窝网络</span>`;
+    else baseInfo.tags = `<span style="color:#12512a;">🏠 住宅家宽</span>`;
   }
 
+  // 3. 解析风控雷达 (主接口)
+  let mainInfo = { score: `<span style="color:gray;">风控阻断或超时</span>`, attrs: `<span style="color:gray;">缺失</span>` };
+  
+  if (!mainRes.error && mainRes.data) {
+    const d = mainRes.data;
+    
+    // 如果 IP-API 意外死机，用主接口的数据兜底基础信息
+    if (baseInfo.ip === "未知") {
+      baseInfo.ip = d.ipAddress || d.query || d.ip || "未知";
+      const flag = getFlagEmoji(d.countryCode);
+      const rawLoc = [...new Set([d.country, d.region, d.city].filter(Boolean))].join(", ") || "未知";
+      baseInfo.loc = flag + translateCN(rawLoc);
+      baseInfo.isp = translateCN(d.asOrganization || d.isp || "未知");
+      baseInfo.asn = d.asNumber || d.asn || (d.as && d.as.replace(/[^0-9]/g, "")) || "未知";
+    }
+
+    const score = d.fraudScore;
+    const level = getScoreLevel(score);
+    mainInfo.score = (score !== null && score !== undefined && score !== "N/A" && score !== "") 
+      ? `<span style="color:${level.color};">${score}% ${level.text}</span>`
+      : `<span style="color:gray;">N/A - 未知</span>`;
+
+    // 严谨的非黑即白判定
+    const typeHtml = (d.isResidential === true) ? `<span style="color:#12512a;">🏠 住宅网络</span>` : `<span style="color:#6aa312;">🏢 数据中心</span>`;
+    const brdHtml = (d.isBroadcast === true) ? `<span style="color:#bb8f06;">📡 广播</span>` : `<span style="color:#12512a;">🌐 原生</span>`;
+    mainInfo.attrs = `${typeHtml} • ${brdHtml}`;
+  }
+
+  // 4. 组装极致美观的上下分层 UI
   const html = `
 <div style="margin:0;padding:0;font-family:-apple-system;font-size:large;">
-<b>IP:</b> ${standardData.ip}<br><br>
-<b>位置:</b> ${standardData.loc}<br><br>
-<b>ISP:</b> ${standardData.isp}<br><br>
-<b>ASN:</b> ${standardData.asn}<br><br>
-<b>属性:</b> ${standardData.attrHtml}<br><br>
-<b>系数:</b> ${standardData.scoreHtml}<br><br>
+<b>IP:</b> ${baseInfo.ip}<br><br>
+<b>位置:</b> ${baseInfo.loc}<br><br>
+<b>ISP:</b> ${baseInfo.isp}<br><br>
+<b>ASN:</b> ${baseInfo.asn}<br>
+
+<hr style="border: none; border-top: 1px dashed #ccc; margin: 15px 0;">
+<div style="font-size: 0.85em; color: gray; margin-bottom: 8px;">📊 深度风控雷达 (123169)</div>
+<b>属性:</b> ${mainInfo.attrs}<br><br>
+<b>纯净:</b> ${mainInfo.score}<br>
+
+<hr style="border: none; border-top: 1px dashed #ccc; margin: 15px 0;">
+<div style="font-size: 0.85em; color: gray; margin-bottom: 8px;">🌐 基础测绘雷达 (IP-API)</div>
+<b>画像:</b> ${baseInfo.tags}<br><br>
+
 <div>
-<b>节点</b> ➟ <span style="color:#1b9e4b;">${NODE_NAME}</span> 
-<span style="font-size:small;color:gray;">(${standardData.engine})</span>
+<b>节点</b> ➟ <span style="color:#1b9e4b;">${NODE_NAME}</span>
 </div>
 </div>
 `.trim();
