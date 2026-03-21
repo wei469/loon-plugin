@@ -1,10 +1,15 @@
-#!name=网络工具（自用）
-#!desc=纯净度 + 链路分析
+#!name=自建网络工具
+#!desc=纯净度 + 链路分析 + ip
 #!author=me
 #!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png
 
 [Script]
-
+# 原有脚本
 generic script-path=https://raw.githubusercontent.com/wei469/loon-plugin/main/ip_quality.js, timeout=10, tag=IP纯净度, img-url=leaf
-
 generic script-path=https://raw.githubusercontent.com/wei469/loon-plugin/main/link_info.js, timeout=10, tag=链路分析, img-url=network
+
+# 新增脚本 1
+generic script-path=https://raw.githubusercontent.com/wei469/loon-plugin/refs/heads/main/enxiu-ip.js, timeout=10, tag=网络质量, img-url=speedometer
+
+# 新增脚本 2
+generic script-path=https://raw.githubusercontent.com/wei469/loon-plugin/refs/heads/main/ippure.js, timeout=10, tag=ippure, img-url=bolt.horizontal
